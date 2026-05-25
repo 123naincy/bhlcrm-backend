@@ -10,6 +10,11 @@ import XLSX from "xlsx";
 import axios from "axios";
 import { detectProjectFromSource } from "../../utils/detectProjectFromSource";
 import { extractProjectName } from "../../utils/leadProjectUtils";
+import {
+  parseSimpleImportRow,
+  prepareLeadForDb,
+  sheetToRows,
+} from "../../utils/importLeadUtils";
 
 const populateLeadQuery = (query: any) =>
   query
@@ -953,17 +958,9 @@ export const importLeads = async (
       req.user?.brand?._id ||
       req.user?.userId;
 
-    if (!brandId) {
-      return res.status(400).json({
-        message: "Brand ID missing",
-      });
-    }
-
     const workbook = XLSX.read(
       req.file.buffer,
-      {
-        type: "buffer",
-      }
+      { type: "buffer" }
     );
 
     const sheetName =
@@ -978,241 +975,68 @@ export const importLeads = async (
       );
 
     const imported: any[] = [];
-    const skipped: any[] = [];
 
-    const fieldMap: Record<
-      string,
-      string
-    > = {
-      name: "fullName",
-      fullname: "fullName",
-      "customer name":
-        "fullName",
+    for (let i = 0; i < rows.length; i++) {
+      const row: any = rows[i];
+console.log("NEW IMPORT CODE RUNNING");
+     imported.push({
+  fullName:
+    String(
+      row.full_name ||
+      row.name ||
+      row["full name"] ||
+      row["customer name"] ||
+      row.customer ||
+      `Lead ${i + 1}`
+    ).trim(),
 
-      phone: "phone",
-      mobile: "phone",
-      contact: "phone",
-      "phone number":
-        "phone",
+  phone:
+    String(
+      row.phone_number ||
+      row.phone ||
+      row.mobile ||
+      row.contact ||
+      row.number ||
+      row["phone no"] ||
+      row["mobile no"] ||
+      ""
+    ).trim() || `NO_PHONE_${i}`,
 
-      "alternate phone":
-        "alternatePhone",
+  email:
+    String(
+      row.email ||
+      row.mail ||
+      row["email id"] ||
+      ""
+    ).trim(),
 
-      email: "email",
-      "email address":
-        "email",
-
-      city: "city",
-      location: "city",
-
-      budget: "budget",
-
-      "property type":
-        "propertyType",
-
-      project: "projectName",
-      "project name":
-        "projectName",
-      form: "projectName",
-
-      "source type":
-        "sourceType",
-
-      sourcetype:
-        "sourceType",
-
-      identifier:
-        "identifier",
-
-      campaign:
-        "campaignName",
-
-      "campaign name":
-        "campaignName",
-
-      "ad set":
-        "adSetName",
-
-      "ad set name":
-        "adSetName",
-
-      "ad name":
-        "adName",
-
-      keyword: "keyword",
-    };
-
-    for (const row of rows as any[]) {
-      const leadData: any = {
-        fullName: "",
-        phone: "",
-        alternatePhone: "",
-        email: "",
-        city: "Unknown",
-
-        source: "csv_import",
-
-        campaignName: "",
-        adSetName: "",
-        adName: "",
-        keyword: "",
-
-        budget: "",
-        propertyType: "",
-
-        projectName:
-          req.body.projectName ||
-          "",
-
-        sourceType: "",
-        identifier: "",
-
-        status: "new",
-        temperature:
-          "cold",
-
-        brandId,
-
-        isDuplicate: false,
-        extraFields: {},
-      };
-
-      Object.keys(row).forEach(
-        (key) => {
-          const normalizedKey =
-            key
-              .toLowerCase()
-              .trim();
-
-          const mappedField =
-            fieldMap[
-              normalizedKey
-            ];
-
-          if (mappedField) {
-            leadData[
-              mappedField
-            ] = row[key];
-          } else {
-            leadData.extraFields[
-              key
-            ] = row[key];
-          }
-        }
-      );
-
-      // AUTO DETECT PROJECT
-      let detectedProject =
-        null;
-
-      if (
-        leadData.sourceType &&
-        leadData.identifier
-      ) {
-        detectedProject =
-          await detectProjectFromSource(
-            leadData.sourceType,
-            leadData.identifier,
-            brandId
-          );
-
-        if (
-          detectedProject
-        ) {
-          leadData.projectId =
-            detectedProject.projectId;
-
-          leadData.projectName =
-            detectedProject.projectName;
-        }
-      }
-
-      if (
-        !leadData.fullName ||
-        !leadData.phone
-      ) {
-        skipped.push({
-          reason:
-            "Missing required fields",
-          row,
-        });
-
-        continue;
-      }
-
-      leadData.phone =
-        String(
-          leadData.phone
-        ).trim();
-
-      if (leadData.email) {
-        leadData.email =
-          String(
-            leadData.email
-          )
-            .toLowerCase()
-            .trim();
-      }
-
-      const existing =
-        await Lead.findOne({
-          $or: [
-            {
-              phone:
-                leadData.phone,
-            },
-            ...(leadData.email
-              ? [
-                  {
-                    email:
-                      leadData.email,
-                  },
-                ]
-              : []),
-          ],
-        });
-
-      if (existing) {
-        skipped.push({
-          reason:
-            "Duplicate lead",
-          row,
-        });
-
-        continue;
-      }
-
-      imported.push(
-        leadData
-      );
+  city: "Unknown",
+  source: "csv_import",
+  status: "new",
+  temperature: "cold",
+  brandId,
+  projectName:
+    req.body.projectName || "",
+});
     }
 
-    if (imported.length > 0) {
-      await Lead.insertMany(
-        imported
-      );
-    }
+    await Lead.insertMany(
+      imported,
+      { ordered: false }
+    );
 
     res.status(200).json({
       success: true,
-      message:
-        "Import completed successfully",
       importedCount:
         imported.length,
-      skippedCount:
-        skipped.length,
-      skipped,
     });
+
   } catch (error) {
-    console.error(
-      "IMPORT ERROR:",
-      error
-    );
+    console.error(error);
 
     res.status(500).json({
       message:
         "Import failed",
-      error,
     });
   }
 };

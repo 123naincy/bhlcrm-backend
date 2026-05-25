@@ -151,11 +151,10 @@ const LeadSchema: Schema =
         default: "",
       },
 
-      city: {
-        type: String,
-        required: true,
-      },
-
+     city: {
+  type: String,
+  default: "",
+},
       budget: {
         type: String,
         default: "",
