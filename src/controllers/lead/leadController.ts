@@ -10,11 +10,6 @@ import XLSX from "xlsx";
 import axios from "axios";
 import { detectProjectFromSource } from "../../utils/detectProjectFromSource";
 import { extractProjectName } from "../../utils/leadProjectUtils";
-import {
-  parseSimpleImportRow,
-  prepareLeadForDb,
-  sheetToRows,
-} from "../../utils/importLeadUtils";
 
 const populateLeadQuery = (query: any) =>
   query
@@ -963,83 +958,75 @@ export const importLeads = async (
       { type: "buffer" }
     );
 
-    const sheetName =
-      workbook.SheetNames[0];
-
     const worksheet =
-      workbook.Sheets[sheetName];
+      workbook.Sheets[
+        workbook.SheetNames[0]
+      ];
 
-    const rows =
+    const rows: any[] =
       XLSX.utils.sheet_to_json(
         worksheet
       );
 
     const imported: any[] = [];
 
-    for (let i = 0; i < rows.length; i++) {
-      const row: any = rows[i];
-console.log("NEW IMPORT CODE RUNNING");
-     imported.push({
-  fullName:
-    String(
-      row.full_name ||
-      row.name ||
-      row["full name"] ||
-      row["customer name"] ||
-      row.customer ||
-      `Lead ${i + 1}`
-    ).trim(),
+   for (let i = 0; i < rows.length; i++) {
+  const row: any = rows[i];
 
-  phone:
-    String(
-      row.phone_number ||
-      row.phone ||
-      row.mobile ||
-      row.contact ||
-      row.number ||
-      row["phone no"] ||
-      row["mobile no"] ||
-      ""
-    ).trim() || `NO_PHONE_${i}`,
+  const values = Object.values(row);
 
-  email:
-    String(
-      row.email ||
-      row.mail ||
-      row["email id"] ||
-      ""
-    ).trim(),
+  const fullName = String(values[0] || "").trim();
+  const phone = String(values[1] || "").trim();
+  const email = String(values[2] || "").trim();
 
-  city: "Unknown",
-  source: "csv_import",
-  status: "new",
-  temperature: "cold",
-  brandId,
-  projectName:
-    req.body.projectName || "",
-});
+  if (!fullName && !phone && !email) {
+    continue;
+  }
+
+  imported.push({
+    fullName: fullName || `Lead ${i + 1}`,
+    phone: phone || `NO_PHONE_${i}`,
+    email: email || "",
+    city: "Unknown",
+    source: "csv_import",
+    status: "new",
+    temperature: "cold",
+    brandId,
+    projectName: req.body.projectName || "",
+  });
+}
+
+    if (
+      imported.length > 0
+    ) {
+      await Lead.insertMany(
+        imported,
+        {
+          ordered: false,
+        }
+      );
     }
 
-    await Lead.insertMany(
-      imported,
-      { ordered: false }
-    );
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       importedCount:
         imported.length,
     });
-
   } catch (error) {
-    console.error(error);
+    console.error(
+      "IMPORT ERROR:",
+      error
+    );
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message:
         "Import failed",
+      error,
     });
   }
 };
+
 export const getAllLeads = async (
   req: any,
   res: Response
@@ -1062,6 +1049,7 @@ export const getAllLeads = async (
     });
   }
 };
+
 export const getAssignedLeads =
   async (
     req: any,
