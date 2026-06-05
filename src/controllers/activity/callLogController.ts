@@ -10,6 +10,9 @@ export const createCallLog = async (
   res: Response
 ) => {
   try {
+
+    console.log("REQ BODY =", JSON.stringify(req.body, null, 2));
+
     const {
       leadId,
       phone,
@@ -17,6 +20,8 @@ export const createCallLog = async (
       duration,
       recordingUrl,
     } = req.body;
+
+    console.log("RECORDING URL =", recordingUrl);
 
     const callLog =
       await CallLog.create({
@@ -31,6 +36,11 @@ export const createCallLog = async (
         callDate: new Date(),
       });
 
+    console.log(
+      "SAVED CALL LOG =",
+      JSON.stringify(callLog, null, 2)
+    );
+
     return res.status(201).json({
       success: true,
       message: "Call log saved successfully",
@@ -40,16 +50,13 @@ export const createCallLog = async (
   } catch (error: any) {
 
     console.error(error);
-console.log("USER => ", req.user);
-console.log("USER ID => ", req.user?._id);
-console.log("USER ID2 => ", req.user?.id);
+
     return res.status(500).json({
       success: false,
       message: error.message,
     });
   }
 };
-
 export const getMyCallLogs =
   async (
     req: AuthRequest,
