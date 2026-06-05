@@ -13,6 +13,7 @@ import followUpRoutes from "./routes/followUpRoutes";
 import notificationRoutes from "./routes/notificationRoutes";
 import projectRoutes from "./routes/project/projectRoutes";
 import callLogRoutes from "./routes/callLogRoutes";
+import uploadRoutes from "./routes/uploadRoutes";
 dotenv.config();
 
 const app = express();
@@ -31,6 +32,7 @@ app.use("/api/followups", followUpRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/projects", projectRoutes);
 app.use("/api/call-logs", callLogRoutes);
+app.use("/api/upload", uploadRoutes);
 app.use(
   "/api/source-mappings",
   sourceRoutes
