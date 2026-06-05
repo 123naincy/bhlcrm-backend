@@ -28,17 +28,35 @@ router.post(
   upload.single("recording"),
   async (req, res) => {
     try {
+if (!req.file) {
+  return res.status(400).json({
+    success: false,
+    message: "Recording file required",
+  });
+}
 
-      if (!req.file) {
-        return res.status(400).json({
-          success: false,
-          message: "Recording file required",
-        });
-      }
+console.log(
+  "REGION =",
+  process.env.AWS_REGION
+);
 
-      const fileName =
-        `${Date.now()}-${req.file.originalname}`;
+console.log(
+  "BUCKET =",
+  process.env.AWS_BUCKET_NAME
+);
 
+console.log(
+  "FILE =",
+  req.file.originalname
+);
+
+console.log(
+  "SIZE =",
+  req.file.size
+);
+
+const fileName =
+  `${Date.now()}-${req.file.originalname}`;
       await s3.send(
         new PutObjectCommand({
           Bucket:
@@ -60,13 +78,17 @@ router.post(
         url,
       });
 
-    } catch (error) {
+    } catch (error: any) {
 
-      console.error(error);
+  console.error(
+    "UPLOAD ERROR:",
+    JSON.stringify(error, null, 2)
+  );
 
       return res.status(500).json({
         success: false,
-        message: "Upload failed",
+        message:
+          error?.message || "Upload failed",
       });
     }
   }
