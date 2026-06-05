@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
+
 
 import { connectDB } from "./config/db";
 import sourceRoutes from "./routes/source/sourceRoutes";
@@ -14,7 +14,7 @@ import notificationRoutes from "./routes/notificationRoutes";
 import projectRoutes from "./routes/project/projectRoutes";
 import callLogRoutes from "./routes/callLogRoutes";
 import uploadRoutes from "./routes/uploadRoutes";
-dotenv.config();
+
 
 const app = express();
 
