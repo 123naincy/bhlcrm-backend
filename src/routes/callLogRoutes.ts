@@ -6,6 +6,8 @@ import {
   getLeadCallLogs,
 } from "../controllers/activity/callLogController";
 
+import { playRecording } from "../controllers/activity/playRecording";
+
 import { protect } from "../middleware/auth/authMiddleware";
 
 const router = express.Router();
@@ -21,7 +23,11 @@ router.get(
   protect,
   getMyCallLogs
 );
-
+router.get(
+  "/:callLogId/play",
+  protect,
+  playRecording
+);
 router.get(
   "/lead/:leadId",
   protect,

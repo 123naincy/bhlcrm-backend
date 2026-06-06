@@ -12,7 +12,8 @@ export const createCallLog = async (
   try {
 
     console.log("REQ BODY =", JSON.stringify(req.body, null, 2));
-
+console.log("PLAY API HIT");
+console.log("CALL LOG ID:", req.params.callLogId);
     const {
       leadId,
       phone,
@@ -123,3 +124,27 @@ export const getLeadCallLogs =
       });
     }
   };
+
+  export const playRecording = async (
+  req: any,
+  res: any
+) => {
+  const callLog =
+    await CallLog.findById(
+      req.params.callLogId
+    );
+
+  if (!callLog) {
+    return res
+      .status(404)
+      .json({
+        message:
+          "Recording not found",
+      });
+  }
+
+  res.json({
+    success: true,
+    url: callLog.recordingUrl,
+  });
+};
