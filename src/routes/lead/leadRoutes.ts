@@ -20,6 +20,7 @@ import {
   capturePublicLead,
   metaWebhookVerify,
   metaWebhookReceive,
+  getEmployeePerformance
 } from "../../controllers/lead/leadController";
 import { authorizeRoles } from "../../middleware/auth/roleMiddleware";
 import { protect } from "../../middleware/auth/authMiddleware";
@@ -47,6 +48,18 @@ router.get(
   authorizeRoles("sales_executive", "telecaller"),
   getMyLeads
 );
+router.get(
+  "/employee-performance",
+  protect,
+  authorizeRoles(
+    "super_admin",
+    "admin",
+    "sales_manager"
+  ),
+  getEmployeePerformance
+);
+
+
 router.get("/filter", protect, filterLeads);
 router.get("/single/:id", protect, getSingleLead);
 router.get("/export", protect, exportLeads);

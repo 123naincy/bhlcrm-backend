@@ -161,35 +161,195 @@ export const createLead = async (
 /**
  * GET LEADS
  */
-export const getLeads = async (req: any, res: Response) => {
+export const getLeads = async (
+  req: any,
+  res: Response
+) => {
   try {
     const user = req.user;
-    let leads;
 
+    const {
+      search,
+      status,
+      temperature,
+      assignedTo,
+      dateRange,
+      fromDate,
+      toDate,
+    } = req.query;
+
+    const filter: any = {};
+
+    // Role based restriction
     if (
-      user.role === "super_admin" ||
-      user.role === "admin" ||
-      user.role === "sales_manager"
+      user.role !== "super_admin" &&
+      user.role !== "admin" &&
+      user.role !== "sales_manager"
     ) {
-      leads = await populateLeadQuery(Lead.find()).sort({
-        createdAt: -1,
-      });
-    } else {
-      leads = await populateLeadQuery(
-        Lead.find({
-          assignedTo: user.userId,
-        })
-      ).sort({ createdAt: -1 });
+      filter.assignedTo =
+        user.userId;
     }
 
-    res.status(200).json({
-      count: leads.length,
-      leads: serializeLeads(leads),
+    // Search
+    if (search) {
+      filter.$or = [
+        {
+          fullName: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          phone: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+      ];
+    }
+
+    // Status
+    if (status) {
+      filter.status = status;
+    }
+
+    // Temperature
+    if (temperature) {
+      filter.temperature =
+        temperature;
+    }
+
+    // Team Member Filter
+    if (
+      assignedTo &&
+      (
+        user.role ===
+          "super_admin" ||
+        user.role ===
+          "admin" ||
+        user.role ===
+          "sales_manager"
+      )
+    ) {
+      filter.assignedTo =
+        assignedTo;
+    }
+
+    // Date Filter
+    const today =
+      new Date();
+
+    if (
+      dateRange === "today"
+    ) {
+      const start =
+        new Date();
+
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      const end =
+        new Date();
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      filter.updatedAt = {
+        $gte: start,
+        $lte: end,
+      };
+    }
+
+    if (
+      dateRange ===
+      "last7days"
+    ) {
+      const start =
+        new Date();
+
+      start.setDate(
+        start.getDate() - 7
+      );
+
+      filter.updatedAt = {
+        $gte: start,
+      };
+    }
+
+    if (
+      dateRange ===
+      "thisMonth"
+    ) {
+      const start =
+        new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          1
+        );
+
+      filter.updatedAt = {
+        $gte: start,
+      };
+    }
+
+    if (
+      dateRange ===
+        "custom" &&
+      fromDate &&
+      toDate
+    ) {
+      const start =
+        new Date(
+          fromDate as string
+        );
+
+      const end =
+        new Date(
+          toDate as string
+        );
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      filter.updatedAt = {
+        $gte: start,
+        $lte: end,
+      };
+    }
+
+    const leads =
+      await populateLeadQuery(
+        Lead.find(filter)
+      ).sort({
+        updatedAt: -1,
+      });
+
+    return res.status(200).json({
+      count:
+        leads.length,
+      leads:
+        serializeLeads(
+          leads
+        ),
     });
   } catch (error) {
-    res.status(500).json({
-      message: "Server error",
-      error,
+    console.error(error);
+
+    return res.status(500).json({
+      message:
+        "Server error",
     });
   }
 };
@@ -369,7 +529,7 @@ export const updateLead = async (
         role: {
           $in: [
             "super_admin",
-            "Admin",
+            "admin",
             "sales_manager",
           ],
         },
@@ -558,7 +718,10 @@ export const getLeadTimeline = async (req: any, res: Response) => {
 /**
  * FILTER + SEARCH LEADS
  */
-export const filterLeads = async (req: any, res: Response) => {
+export const filterLeads = async (
+  req: any,
+  res: Response
+) => {
   try {
     const user = req.user;
 
@@ -569,22 +732,27 @@ export const filterLeads = async (req: any, res: Response) => {
       source,
       city,
       propertyType,
+      employeeId,
+      fromDate,
+      toDate,
     } = req.query;
 
     const query: any = {};
 
-    // Role restriction
     const privilegedRoles = [
       "super_admin",
       "admin",
       "sales_manager",
     ];
 
-    if (!privilegedRoles.includes(user.role)) {
+    // Role restriction
+    if (
+      !privilegedRoles.includes(user.role)
+    ) {
       query.assignedTo = user.userId;
     }
 
-    // Search by name / phone / email
+    // Search
     if (search) {
       query.$or = [
         {
@@ -608,29 +776,58 @@ export const filterLeads = async (req: any, res: Response) => {
       ];
     }
 
+    // Existing filters
     if (status) query.status = status;
-    if (temperature) query.temperature = temperature;
+    if (temperature)
+      query.temperature = temperature;
     if (source) query.source = source;
     if (city) query.city = city;
-    if (propertyType) query.propertyType = propertyType;
+    if (propertyType)
+      query.propertyType = propertyType;
+
+    // Employee Filter
+    if (
+      employeeId &&
+      privilegedRoles.includes(user.role)
+    ) {
+      query.assignedTo = employeeId;
+    }
+
+    // Date Filter
+    if (fromDate && toDate) {
+      query.createdAt = {
+        $gte: new Date(fromDate),
+        $lte: new Date(
+          new Date(toDate).setHours(
+            23,
+            59,
+            59,
+            999
+          )
+        ),
+      };
+    }
 
     const leads = await Lead.find(query)
-      .populate("assignedTo", "fullName email role")
+      .populate(
+        "assignedTo",
+        "fullName email role"
+      )
       .sort({ createdAt: -1 });
 
-    res.status(200).json({
+    return res.status(200).json({
       count: leads.length,
       leads,
     });
-
   } catch (error) {
-    res.status(500).json({
+    console.error(error);
+
+    return res.status(500).json({
       message: "Server error",
       error,
     });
   }
 };
-
 // getSingleLead
 
 export const getSingleLead = async (req: any, res: Response) => {
@@ -674,8 +871,6 @@ export const getSingleLead = async (req: any, res: Response) => {
     });
   }
 };
-
-
 export const getKanbanLeads = async (
   req: any,
   res: Response
@@ -783,46 +978,18 @@ export const exportLeads = async (
 ) => {
   try {
     const {
-      status,
       source,
       city,
       assignedTo,
       temperature,
-      search,
     } = req.query;
 
-    const filter: any = {};
+    const filter: any = buildLeadFilter(req);
 
-    if (status) filter.status = status;
     if (source) filter.source = source;
     if (city) filter.city = city;
-    if (assignedTo)
-      filter.assignedTo = assignedTo;
-    if (temperature)
-      filter.temperature = temperature;
-
-    if (search) {
-      filter.$or = [
-        {
-          fullName: {
-            $regex: search,
-            $options: "i",
-          },
-        },
-        {
-          phone: {
-            $regex: search,
-            $options: "i",
-          },
-        },
-        {
-          email: {
-            $regex: search,
-            $options: "i",
-          },
-        },
-      ];
-    }
+    if (assignedTo) filter.assignedTo = assignedTo;
+    if (temperature) filter.temperature = temperature;
 
     const leads = await Lead.find(filter)
       .populate(
@@ -1032,9 +1199,15 @@ export const getAllLeads = async (
   res: Response
 ) => {
   try {
-    const leads = await populateLeadQuery(Lead.find()).sort({
-      createdAt: -1,
-    });
+   const filter =
+  buildLeadFilter(req);
+
+const leads =
+  await populateLeadQuery(
+    Lead.find(filter)
+  ).sort({
+    createdAt: -1,
+  });
 
     res.status(200).json({
       success: true,
@@ -1056,15 +1229,19 @@ export const getAssignedLeads =
     res: Response
   ) => {
     try {
-      const leads = await populateLeadQuery(
-        Lead.find({
-          assignedTo: {
-            $ne: null,
-          },
-        })
-      ).sort({
-        createdAt: -1,
-      });
+      const filter =
+  buildLeadFilter(req);
+
+filter.assignedTo = {
+  $ne: null,
+};
+
+const leads =
+  await populateLeadQuery(
+    Lead.find(filter)
+  ).sort({
+    createdAt: -1,
+  });
 
       res.status(200).json({
         success: true,
@@ -1086,11 +1263,18 @@ export const getAssignedLeads =
   try {
     const user = req.user;
 
-    const leads = await populateLeadQuery(
-      Lead.find({
-        assignedTo: user.userId,
-      })
-    ).sort({ createdAt: -1 });
+    const filter =
+  buildLeadFilter(req);
+
+filter.assignedTo =
+  user.userId;
+
+const leads =
+  await populateLeadQuery(
+    Lead.find(filter)
+  ).sort({
+    createdAt: -1,
+  });
 
     res.status(200).json({
       success: true,
@@ -1692,3 +1876,214 @@ export const addLeadNote =
       });
     }
   };
+
+ // getemployeeperformance
+  export const getEmployeePerformance = async (
+  req: any,
+  res: Response
+) => {
+  try {
+    const {
+      employeeId,
+      fromDate,
+      toDate,
+    } = req.query;
+
+    if (!employeeId) {
+      return res.status(400).json({
+        message: "Employee Id required",
+      });
+    }
+
+    const assignedLeads =
+      await Lead.countDocuments({
+        assignedTo: employeeId,
+      });
+
+    const workedLeadIds =
+      await LeadActivity.find({
+        performedBy: employeeId,
+        createdAt: {
+          $gte: new Date(fromDate),
+          $lte: new Date(
+            new Date(toDate).setHours(
+              23,
+              59,
+              59,
+              999
+            )
+          ),
+        },
+      }).distinct("leadId");
+
+    const workedLeads =
+      workedLeadIds.length;
+
+    const pendingLeads =
+      assignedLeads - workedLeads;
+
+    const leads = await Lead.find({
+      _id: {
+        $in: workedLeadIds,
+      },
+    })
+      .populate(
+        "assignedTo",
+        "fullName"
+      )
+      .sort({
+        updatedAt: -1,
+      });
+
+    return res.status(200).json({
+      assignedLeads,
+      workedLeads,
+      pendingLeads,
+      leads,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      message: "Server Error",
+    });
+  }
+};
+const buildLeadFilter = (
+  req: any
+) => {
+  const {
+    search,
+    status,
+    temperature,
+    assignedTo,
+    dateRange,
+    fromDate,
+    toDate,
+  } = req.query;
+
+  const filter: any = {};
+  const today = new Date();
+
+  const applyRange = (start: Date, end?: Date) => {
+    filter.createdAt = end
+      ? {
+          $gte: start,
+          $lte: end,
+        }
+      : {
+          $gte: start,
+        };
+  };
+
+  if (search) {
+    filter.$or = [
+      {
+        fullName: {
+          $regex: search,
+          $options: "i",
+        },
+      },
+      {
+        phone: {
+          $regex: search,
+          $options: "i",
+        },
+      },
+    ];
+  }
+
+  if (status) {
+    filter.status = status;
+  }
+
+  if (temperature) {
+    filter.temperature = temperature;
+  }
+
+  if (assignedTo) {
+    filter.assignedTo = assignedTo;
+  }
+
+  if (dateRange === "today") {
+    const start = new Date(today);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+    applyRange(start, end);
+  }
+
+  if (dateRange === "yesterday") {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 1);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(today);
+    end.setDate(end.getDate() - 1);
+    end.setHours(23, 59, 59, 999);
+    applyRange(start, end);
+  }
+
+  if (dateRange === "last7days") {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 6);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+    applyRange(start, end);
+  }
+
+  if (dateRange === "last30days") {
+    const start = new Date(today);
+    start.setDate(start.getDate() - 29);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+    applyRange(start, end);
+  }
+
+  if (dateRange === "thisMonth") {
+    const start = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      1
+    );
+    const end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+    applyRange(start, end);
+  }
+
+  if (dateRange === "lastMonth") {
+    const start = new Date(
+      today.getFullYear(),
+      today.getMonth() - 1,
+      1
+    );
+    const end = new Date(
+      today.getFullYear(),
+      today.getMonth(),
+      0
+    );
+    end.setHours(23, 59, 59, 999);
+    applyRange(start, end);
+  }
+
+  if (
+    dateRange === "custom" &&
+    fromDate &&
+    toDate
+  ) {
+    const start = new Date(fromDate);
+    const end = new Date(toDate);
+
+    end.setHours(
+      23,
+      59,
+      59,
+      999
+    );
+
+    applyRange(start, end);
+  }
+
+  return filter;
+};

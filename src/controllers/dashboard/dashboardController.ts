@@ -1,6 +1,6 @@
 import { Response } from "express";
 import Lead from "../../models/lead/Lead";
-
+import mongoose from "mongoose";
 export const getDashboardStats = async (req: any, res: Response) => {
   try {
     const user = req.user;
@@ -102,10 +102,10 @@ export const getDashboardStats = async (req: any, res: Response) => {
     });
   }
 };
-
-//  getTeamPerformance
-
-export const getTeamPerformance = async (req: any, res: Response) => {
+export const getTeamPerformance = async (
+  req: any,
+  res: Response
+) => {
   try {
     const user = req.user;
 
@@ -117,6 +117,7 @@ export const getTeamPerformance = async (req: any, res: Response) => {
 
     if (!allowedRoles.includes(user.role)) {
       return res.status(403).json({
+        success: false,
         message: "Access denied",
       });
     }
@@ -124,33 +125,9 @@ export const getTeamPerformance = async (req: any, res: Response) => {
     const performance = await Lead.aggregate([
       {
         $match: {
-          assignedTo: { $exists: true },
-        },
-      },
-
-      {
-        $group: {
-          _id: "$assignedTo",
-          assignedLeads: { $sum: 1 },
-
-          hotLeads: {
-            $sum: {
-              $cond: [
-                { $eq: ["$temperature", "hot"] },
-                1,
-                0,
-              ],
-            },
-          },
-
-          wonLeads: {
-            $sum: {
-              $cond: [
-                { $eq: ["$status", "won"] },
-                1,
-                0,
-              ],
-            },
+          assignedTo: {
+            $exists: true,
+            $ne: null,
           },
         },
       },
@@ -158,7 +135,7 @@ export const getTeamPerformance = async (req: any, res: Response) => {
       {
         $lookup: {
           from: "users",
-          localField: "_id",
+          localField: "assignedTo",
           foreignField: "_id",
           as: "employee",
         },
@@ -169,48 +146,188 @@ export const getTeamPerformance = async (req: any, res: Response) => {
       },
 
       {
+        $match: {
+          "employee.role": {
+            $in: [
+              "sales_executive",
+              "telecaller",
+            ],
+          },
+        },
+      },
+
+      {
+        $group: {
+          _id: "$assignedTo",
+
+          employeeName: {
+            $first:
+              "$employee.fullName",
+          },
+
+          role: {
+            $first:
+              "$employee.role",
+          },
+
+          assignedLeads: {
+            $sum: 1,
+          },
+
+          hotLeads: {
+            $sum: {
+              $cond: [
+                {
+                  $eq: [
+                    "$temperature",
+                    "hot",
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+
+          wonLeads: {
+            $sum: {
+              $cond: [
+                {
+                  $eq: [
+                    "$status",
+                    "won",
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+workedLeads: {
+  $sum: {
+    $cond: [
+      {
+        $or: [
+          { $eq: ["$status", "contacted"] },
+          { $eq: ["$status", "follow_up"] },
+          { $eq: ["$status", "interested"] },
+          {
+            $eq: [
+              "$status",
+              "site_visit_scheduled",
+            ],
+          },
+          {
+            $eq: [
+              "$status",
+              "site_visit_done",
+            ],
+          },
+          {
+            $eq: [
+              "$status",
+              "negotiation",
+            ],
+          },
+          { $eq: ["$status", "won"] },
+          { $eq: ["$status", "lost"] },
+        ],
+      },
+      1,
+      0,
+    ],
+  },
+},
+        },
+      },
+
+      {
         $project: {
           _id: 0,
-          employeeId: "$employee._id",
-          employeeName: "$employee.fullName",
-          email: "$employee.email",
-          role: "$employee.role",
+
+          employeeId: "$_id",
+
+          employeeName: 1,
+
+          role: 1,
+
           assignedLeads: 1,
+
+          workedLeads: 1,
+
+          pendingLeads: {
+            $subtract: [
+              "$assignedLeads",
+              "$workedLeads",
+            ],
+          },
+
           hotLeads: 1,
+
           wonLeads: 1,
+
+          conversionRate: {
+            $cond: [
+              {
+                $eq: [
+                  "$assignedLeads",
+                  0,
+                ],
+              },
+              0,
+              {
+                $round: [
+                  {
+                    $multiply: [
+                      {
+                        $divide: [
+                          "$workedLeads",
+                          "$assignedLeads",
+                        ],
+                      },
+                      100,
+                    ],
+                  },
+                  2,
+                ],
+              },
+            ],
+          },
         },
       },
 
       {
         $sort: {
-          assignedLeads: -1,
+          conversionRate: -1,
         },
       },
     ]);
 
-    const teamPerformance = performance.map((row) => ({
-      name: row.employeeName,
-      leadCount: row.assignedLeads,
-      ...row,
-    }));
+    const topPerformer =
+      performance.length > 0
+        ? performance[0]
+        : null;
 
-    res.status(200).json({
+    return res.status(200).json({
+      success: true,
       count: performance.length,
       performance,
-      teamPerformance,
+      topPerformer,
     });
+  } catch (error: any) {
+    console.error(
+      "TEAM PERFORMANCE ERROR:",
+      error
+    );
 
-  } catch (error) {
-    res.status(500).json({
-      message: "Server error",
-      error,
+    return res.status(500).json({
+      success: false,
+      message:
+        error.message ||
+        "Failed to fetch team performance",
     });
   }
 };
-
-
-// getSourcePerformance
-
 export const getSourcePerformance = async (req: any, res: Response) => {
   try {
     const user = req.user;
@@ -291,3 +408,212 @@ export const getSourcePerformance = async (req: any, res: Response) => {
     });
   }
 };
+
+export const getMyDashboard = async (
+  req: any,
+  res: Response
+) => {
+  try {
+    const userId = req.user.userId;
+
+    const [
+      totalLeads,
+      newLeads,
+      contacted,
+      followUp,
+      interested,
+      siteVisitScheduled,
+      siteVisitDone,
+      won,
+      lost,
+    ] = await Promise.all([
+      Lead.countDocuments({
+        assignedTo: userId,
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: "new",
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: "contacted",
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: "follow_up",
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: "interested",
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: "site_visit_scheduled",
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: "site_visit_done",
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: "won",
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        status: "lost",
+      }),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+
+      totalLeads,
+      newLeads,
+      contacted,
+      followUp,
+      interested,
+      siteVisitScheduled,
+      siteVisitDone,
+      won,
+      lost,
+    });
+  } catch (error) {
+    console.log(error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Server Error",
+    });
+  }
+};
+
+export const getMyRecentFollowups = async (
+  req: any,
+  res: Response
+) => {
+  try {
+    const leads = await Lead.find({
+      assignedTo: req.user.userId,
+      status: "follow_up",
+    })
+      .sort({ updatedAt: -1 })
+      .limit(10)
+      .select(
+        "fullName status phone updatedAt"
+      );
+
+    res.status(200).json({
+      success: true,
+      leads,
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Server Error",
+    });
+  }
+};
+export const getMyMonthlyTrend = async (
+  req: any,
+  res: Response
+) => {
+  try {
+    const trend =
+      await Lead.aggregate([
+        {
+          $match: {
+            assignedTo:
+              new mongoose.Types.ObjectId(
+                req.user.userId
+              ),
+          },
+        },
+
+        {
+          $group: {
+            _id: {
+              month: {
+                $month:
+                  "$createdAt",
+              },
+            },
+
+            leads: {
+              $sum: 1,
+            },
+          },
+        },
+
+        {
+          $sort: {
+            "_id.month": 1,
+          },
+        },
+      ]);
+
+   return res.status(200).json({
+  success: true,
+  trend,
+});
+  } catch (error) {
+    res.status(500).json({
+      message: "Server Error",
+    });
+  }
+};
+export const getTodayFollowups =
+  async (
+    req: any,
+    res: Response
+  ) => {
+    try {
+      const start =
+        new Date();
+
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      const end =
+        new Date();
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      const count =
+        await Lead.countDocuments(
+          {
+            assignedTo:
+              req.user.userId,
+
+            followUpDate: {
+              $gte: start,
+              $lte: end,
+            },
+          }
+        );
+
+      res.json({
+        count,
+      });
+    } catch (error) {
+      res.status(500).json({
+        message:
+          "Server Error",
+      });
+    }
+  };

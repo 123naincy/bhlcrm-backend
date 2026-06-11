@@ -7,6 +7,7 @@ import {
   updateUser,
   toggleUserStatus,
   deleteUser,
+  getTeamMembers
 } from "../controllers/user/userController";
 
 const router = express.Router();
@@ -16,6 +17,11 @@ router.get("/:id", protect, getUserById);
 router.post("/", protect, createUser);
 router.put("/:id", protect, updateUser);
 router.delete("/:id", protect, deleteUser);
+router.get(
+  "/team-members",
+  protect,
+  getTeamMembers
+);
 router.patch(
   "/status/:id",
   protect,

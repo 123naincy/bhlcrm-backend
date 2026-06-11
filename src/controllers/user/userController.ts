@@ -1,10 +1,32 @@
 import bcrypt from "bcryptjs";
 import User from "../../models/auth/User";
 
-const allowedRoles = ["super_admin", "admin"];
+const allowedRoles = ["super_admin", "admin"] as const;
+const validUserRoles = [
+  "super_admin",
+  "admin",
+  "sales_manager",
+  "sales_executive",
+  "telecaller",
+] as const;
+
+type UserRole = (typeof validUserRoles)[number];
+type AllowedRole = (typeof allowedRoles)[number];
+
+const isAllowedRole = (role: string): role is AllowedRole => {
+  return allowedRoles.includes(role as AllowedRole);
+};
+
+const isUserRole = (role: string): role is UserRole => {
+  return validUserRoles.includes(role as UserRole);
+};
 
 const checkAccess = (user: any) => {
-  return allowedRoles.includes(user.role);
+  const role = String(user?.role || "")
+    .trim()
+    .toLowerCase();
+
+  return isAllowedRole(role);
 };
 
 /**
@@ -99,12 +121,23 @@ export const createUser = async (req: any, res: any) => {
       city,
     } = req.body;
 
+    const normalizedFullName = String(fullName || "").trim();
+    const normalizedEmail = String(email || "")
+      .trim()
+      .toLowerCase();
+    const normalizedPhone = String(phone || "").trim();
+    const normalizedPassword = String(password || "");
+    const normalizedRole = String(role || "")
+      .trim()
+      .toLowerCase();
+    const normalizedCity = String(city || "").trim();
+
     if (
-      !fullName ||
-      !email ||
-      !phone ||
-      !password ||
-      !role
+      !normalizedFullName ||
+      !normalizedEmail ||
+      !normalizedPhone ||
+      !normalizedPassword ||
+      !normalizedRole
     ) {
       return res.status(400).json({
         success: false,
@@ -112,29 +145,42 @@ export const createUser = async (req: any, res: any) => {
       });
     }
 
+    if (!isUserRole(normalizedRole)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role",
+      });
+    }
+
     const existingUser = await User.findOne({
-      email,
+      $or: [
+        { email: normalizedEmail },
+        { phone: normalizedPhone },
+      ],
     });
 
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: "Email already exists",
+        message:
+          existingUser.email === email
+            ? "Email already exists"
+            : "Phone already exists",
       });
     }
 
     const hashedPassword = await bcrypt.hash(
-      password,
+      normalizedPassword,
       10
     );
 
     const user = await User.create({
-      fullName,
-      email,
-      phone,
+      fullName: normalizedFullName,
+      email: normalizedEmail,
+      phone: normalizedPhone,
       password: hashedPassword,
-      role,
-      city,
+      role: normalizedRole,
+      city: normalizedCity,
       isActive: true,
     });
 
@@ -143,12 +189,19 @@ export const createUser = async (req: any, res: any) => {
       message: "User created successfully",
       user,
     });
-  } catch (error) {
-    console.error(error);
+  } catch (error: any) {
+    console.error("CREATE USER ERROR:", error);
 
-    res.status(500).json({
+    if (error?.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "Email or phone already exists",
+      });
+    }
+
+    return res.status(500).json({
       success: false,
-      message: "Failed to create user",
+      message: error.message || "Failed to create user",
     });
   }
 };
@@ -281,3 +334,36 @@ export const deleteUser = async (
     });
   }
 };
+export const getTeamMembers =
+  async (
+    req: any,
+    res: any
+  ) => {
+    try {
+      const users =
+        await User.find(
+          {
+            role: {
+              $in: [
+                "sales_executive",
+                "telecaller",
+              ],
+            },
+          },
+          "-password"
+        ).sort({
+          fullName: 1,
+        });
+
+      res.status(200).json({
+        success: true,
+        users,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message:
+          "Failed to fetch team members",
+      });
+    }
+  };
