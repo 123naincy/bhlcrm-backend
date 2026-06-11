@@ -5,6 +5,8 @@ import mongoose, {
 
 export interface ILead
   extends Document {
+  createdAt?: Date;
+  updatedAt?: Date;
   fullName: string;
   phone: string;
   alternatePhone?: string;

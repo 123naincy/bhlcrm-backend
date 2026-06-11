@@ -243,7 +243,7 @@ export const getLeads = async (
       dateRange === "today"
     ) {
       const start =
-        new Date();
+        new Date(today);
 
       start.setHours(
         0,
@@ -253,8 +253,44 @@ export const getLeads = async (
       );
 
       const end =
-        new Date();
+        new Date(today);
 
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      filter.updatedAt = {
+        $gte: start,
+        $lte: end,
+      };
+    }
+
+    if (
+      dateRange ===
+      "yesterday"
+    ) {
+      const start =
+        new Date(today);
+
+      start.setDate(
+        start.getDate() - 1
+      );
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      const end =
+        new Date(today);
+
+      end.setDate(
+        end.getDate() - 1
+      );
       end.setHours(
         23,
         59,
@@ -273,14 +309,64 @@ export const getLeads = async (
       "last7days"
     ) {
       const start =
-        new Date();
+        new Date(today);
 
       start.setDate(
-        start.getDate() - 7
+        start.getDate() - 6
+      );
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      const end =
+        new Date(today);
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
       );
 
       filter.updatedAt = {
         $gte: start,
+        $lte: end,
+      };
+    }
+
+    if (
+      dateRange ===
+      "last30days"
+    ) {
+      const start =
+        new Date(today);
+
+      start.setDate(
+        start.getDate() - 29
+      );
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      const end =
+        new Date(today);
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      filter.updatedAt = {
+        $gte: start,
+        $lte: end,
       };
     }
 
@@ -295,8 +381,50 @@ export const getLeads = async (
           1
         );
 
+      const end =
+        new Date(today);
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
       filter.updatedAt = {
         $gte: start,
+        $lte: end,
+      };
+    }
+
+    if (
+      dateRange ===
+      "lastMonth"
+    ) {
+      const start =
+        new Date(
+          today.getFullYear(),
+          today.getMonth() - 1,
+          1
+        );
+
+      const end =
+        new Date(
+          today.getFullYear(),
+          today.getMonth(),
+          0
+        );
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      filter.updatedAt = {
+        $gte: start,
+        $lte: end,
       };
     }
 
@@ -333,7 +461,7 @@ export const getLeads = async (
       await populateLeadQuery(
         Lead.find(filter)
       ).sort({
-        updatedAt: -1,
+          updatedAt: -1,
       });
 
     return res.status(200).json({
@@ -542,6 +670,7 @@ export const updateLead = async (
       status !== oldStatus
     ) {
       lead.status = status;
+      lead.updatedAt = new Date();
 
       await logLeadActivity({
         leadId:
@@ -813,7 +942,7 @@ export const filterLeads = async (
         "assignedTo",
         "fullName email role"
       )
-      .sort({ createdAt: -1 });
+      .sort({ updatedAt: -1 });
 
     return res.status(200).json({
       count: leads.length,
@@ -946,7 +1075,7 @@ export const getKanbanLeads = async (
 
     const [leads, total] = await Promise.all([
       populateLeadQuery(Lead.find(query))
-        .sort({ createdAt: -1 })
+        .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(Number(limit)),
 
@@ -996,7 +1125,7 @@ export const exportLeads = async (
         "assignedTo",
         "fullName email"
       )
-      .sort({ createdAt: -1 });
+      .sort({ updatedAt: -1 });
 
     const workbook =
       new ExcelJS.Workbook();
@@ -1206,7 +1335,7 @@ const leads =
   await populateLeadQuery(
     Lead.find(filter)
   ).sort({
-    createdAt: -1,
+          updatedAt: -1,
   });
 
     res.status(200).json({
@@ -1240,7 +1369,7 @@ const leads =
   await populateLeadQuery(
     Lead.find(filter)
   ).sort({
-    createdAt: -1,
+    updatedAt: -1,
   });
 
       res.status(200).json({
@@ -1273,7 +1402,7 @@ const leads =
   await populateLeadQuery(
     Lead.find(filter)
   ).sort({
-    createdAt: -1,
+    updatedAt: -1,
   });
 
     res.status(200).json({
@@ -1777,6 +1906,7 @@ export const updateLeadStatus =
         lead.status;
 
       lead.status = status;
+      lead.updatedAt = new Date();
 
       await lead.save();
 
@@ -1966,7 +2096,7 @@ const buildLeadFilter = (
   const today = new Date();
 
   const applyRange = (start: Date, end?: Date) => {
-    filter.createdAt = end
+    filter.updatedAt = end
       ? {
           $gte: start,
           $lte: end,
