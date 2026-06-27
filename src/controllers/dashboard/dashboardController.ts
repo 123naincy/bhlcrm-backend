@@ -1,6 +1,273 @@
 import { Response } from "express";
 import Lead from "../../models/lead/Lead";
 import mongoose from "mongoose";
+import User from "../../models/auth/User";
+import LeadActivity from "../../models/activity/LeadActivity";
+import FollowUp from "../../models/followup/FollowUp";
+
+async function getFollowUpUpdateCounts() {
+  const [
+    activityCounts,
+    noteCounts,
+  ] = await Promise.all([
+    LeadActivity.aggregate([
+      {
+        $match: {
+          $or: [
+            {
+              actionType:
+                "followup_updated",
+            },
+            {
+              actionType:
+                "notes_updated",
+            },
+            {
+              actionType:
+                "status_updated",
+              newValue: "follow_up",
+            },
+            {
+              actionType:
+                "status_updated",
+              newValue: "contacted",
+            },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: "$performedBy",
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+
+    FollowUp.aggregate([
+      {
+        $group: {
+          _id: "$createdBy",
+          count: { $sum: 1 },
+        },
+      },
+    ]),
+  ]);
+
+  const counts = new Map<
+    string,
+    number
+  >();
+
+  for (const row of activityCounts) {
+    if (!row._id) continue;
+
+    const id = row._id.toString();
+
+    counts.set(
+      id,
+      (counts.get(id) || 0) +
+        row.count
+    );
+  }
+
+  for (const row of noteCounts) {
+    if (!row._id) continue;
+
+    const id = row._id.toString();
+
+    counts.set(
+      id,
+      (counts.get(id) || 0) +
+        row.count
+    );
+  }
+
+  return counts;
+}
+
+async function getTopFollowUpPerformer(
+  performanceRows: any[] = []
+) {
+  const followUpCounts =
+    await getFollowUpUpdateCounts();
+
+  const teamUsers =
+    await User.find({
+      role: {
+        $in: [
+          "sales_executive",
+          "telecaller",
+          "sales_manager",
+        ],
+      },
+      $or: [
+        { isActive: true },
+        { isActive: { $exists: false } },
+      ],
+    }).select("_id fullName role");
+
+  const ranking = teamUsers
+    .map((user) => ({
+      employeeId: user._id,
+      employeeName: user.fullName,
+      role: user.role,
+      followUpUpdates:
+        followUpCounts.get(
+          user._id.toString()
+        ) || 0,
+    }))
+    .sort(
+      (a, b) =>
+        b.followUpUpdates -
+        a.followUpUpdates
+    );
+
+  const top = ranking[0];
+
+  if (top && top.followUpUpdates > 0) {
+    return top;
+  }
+
+  const fromPerformance = [
+    ...performanceRows,
+  ]
+    .sort(
+      (a, b) =>
+        (b.followUpUpdates || 0) -
+          (a.followUpUpdates || 0) ||
+        (b.workedLeads || 0) -
+          (a.workedLeads || 0) ||
+        (b.assignedLeads || 0) -
+          (a.assignedLeads || 0)
+    )
+    .find(
+      (row) =>
+        row.role ===
+          "sales_executive" ||
+        row.role === "telecaller"
+    );
+
+  if (fromPerformance) {
+    return {
+      employeeId:
+        fromPerformance.employeeId,
+      employeeName:
+        fromPerformance.employeeName,
+      role: fromPerformance.role,
+      followUpUpdates:
+        fromPerformance.followUpUpdates ||
+        0,
+    };
+  }
+
+  if (top) {
+    return top;
+  }
+
+  return null;
+}
+
+function getTodayRange() {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+
+  return {
+    startOfToday,
+    endOfToday,
+  };
+}
+
+async function countTodayStatusUpdates() {
+  const {
+    startOfToday,
+    endOfToday,
+  } = getTodayRange();
+
+  const teamUsers =
+    await User.find({
+      role: {
+        $in: [
+          "sales_executive",
+          "telecaller",
+        ],
+      },
+    }).select("_id");
+
+  const teamIds =
+    teamUsers.map(
+      (user) => user._id
+    );
+
+  if (!teamIds.length) {
+    return 0;
+  }
+
+  return LeadActivity.countDocuments(
+    {
+      actionType:
+        "status_updated",
+      performedBy: {
+        $in: teamIds,
+      },
+      createdAt: {
+        $gte: startOfToday,
+        $lte: endOfToday,
+      },
+    }
+  );
+}
+
+async function countPendingAssignedLeads() {
+  const teamUsers =
+    await User.find({
+      role: {
+        $in: [
+          "sales_executive",
+          "telecaller",
+        ],
+      },
+    }).select("_id");
+
+  const teamIds =
+    teamUsers.map(
+      (user) => user._id
+    );
+
+  if (!teamIds.length) {
+    return 0;
+  }
+
+  const workedLeadIds =
+    await LeadActivity.distinct(
+      "leadId",
+      {
+        actionType:
+          "status_updated",
+      }
+    );
+
+  return Lead.countDocuments({
+    assignedTo: {
+      $in: teamIds,
+    },
+
+    status: {
+      $nin: [
+        "won",
+        "lost",
+        "junk",
+      ],
+    },
+
+    _id: {
+      $nin: workedLeadIds,
+    },
+  });
+}
+
 export const getDashboardStats = async (req: any, res: Response) => {
   try {
     const user = req.user;
@@ -19,11 +286,10 @@ export const getDashboardStats = async (req: any, res: Response) => {
     }
 
     // Today's date range
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    const endOfToday = new Date();
-    endOfToday.setHours(23, 59, 59, 999);
+    const {
+      startOfToday,
+      endOfToday,
+    } = getTodayRange();
 
     // Parallel DB queries
     const [
@@ -34,6 +300,8 @@ export const getDashboardStats = async (req: any, res: Response) => {
       wonLeads,
       lostLeads,
       todayLeads,
+      todayStatusUpdates,
+      pendingLeads,
       pendingFollowups,
       contactedLeads,
       followUpLeads,
@@ -67,6 +335,10 @@ export const getDashboardStats = async (req: any, res: Response) => {
         },
       }),
 
+      countTodayStatusUpdates(),
+
+      countPendingAssignedLeads(),
+
       Lead.countDocuments({
         followUpDate: {
           $exists: true,
@@ -89,8 +361,14 @@ export const getDashboardStats = async (req: any, res: Response) => {
       coldLeads,
       wonLeads,
       lostLeads,
-      todayLeads,
+      todayLeads:
+        todayStatusUpdates,
+      todayNewLeads: todayLeads,
+      todayStatusUpdates,
+      pendingLeads,
       pendingFollowups,
+      pendingAssignedLeads:
+        pendingLeads,
       followUpLeads,
       contactedLeads,
     });
@@ -303,15 +581,32 @@ workedLeads: {
       },
     ]);
 
+    const followUpCounts =
+      await getFollowUpUpdateCounts();
+
+    const performanceWithFollowUps =
+      performance.map(
+        (row) => ({
+          ...row,
+          followUpUpdates:
+            followUpCounts.get(
+              row.employeeId?.toString() ||
+                ""
+            ) || 0,
+        })
+      );
+
     const topPerformer =
-      performance.length > 0
-        ? performance[0]
-        : null;
+      await getTopFollowUpPerformer(
+        performanceWithFollowUps
+      );
 
     return res.status(200).json({
       success: true,
-      count: performance.length,
-      performance,
+      count:
+        performanceWithFollowUps.length,
+      performance:
+        performanceWithFollowUps,
       topPerformer,
     });
   } catch (error: any) {
@@ -612,6 +907,100 @@ export const getTodayFollowups =
       });
     } catch (error) {
       res.status(500).json({
+        message:
+          "Server Error",
+      });
+    }
+  };
+  export const getManagerSummary =
+  async (
+    req: any,
+    res: Response
+  ) => {
+    try {
+      const start =
+        new Date();
+
+      start.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      const end =
+        new Date();
+
+      end.setHours(
+        23,
+        59,
+        59,
+        999
+      );
+
+      const teamUsers =
+        await User.find({
+          role: {
+            $in: [
+              "sales_executive",
+              "telecaller",
+            ],
+          },
+        }).select("_id");
+
+      const teamIds =
+        teamUsers.map(
+          (u) => u._id
+        );
+
+      const totalTeamLeads =
+        await Lead.countDocuments({
+          assignedTo: {
+            $in: teamIds,
+          },
+        });
+
+      const workedToday =
+        await Lead.countDocuments({
+          assignedTo: {
+            $in: teamIds,
+          },
+          updatedAt: {
+            $gte: start,
+            $lte: end,
+          },
+        });
+
+      const followupsToday =
+        await Lead.countDocuments({
+          assignedTo: {
+            $in: teamIds,
+          },
+          followUpDate: {
+            $gte: start,
+            $lte: end,
+          },
+        });
+
+      const interestedLeads =
+        await Lead.countDocuments({
+          assignedTo: {
+            $in: teamIds,
+          },
+          status:
+            "interested",
+        });
+
+      return res.json({
+        totalTeamLeads,
+        workedToday,
+        followupsToday,
+        interestedLeads,
+      });
+    } catch (error) {
+      console.error(error);
+
+      return res.status(500).json({
         message:
           "Server Error",
       });
