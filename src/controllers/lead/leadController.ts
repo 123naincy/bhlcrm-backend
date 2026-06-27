@@ -2217,3 +2217,38 @@ const buildLeadFilter = (
 
   return filter;
 };
+export const createWebsiteLead =
+  async (
+    req: Request,
+    res: Response
+  ) => {
+    try {
+      const {
+        fullName,
+        phone,
+        email,
+        projectName,
+        website,
+      } = req.body;
+
+      const lead =
+        await Lead.create({
+          fullName,
+          phone,
+          email,
+          projectName,
+          source: "website",
+        });
+
+      return res.status(201).json({
+        success: true,
+        lead,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message:
+          "Failed to create lead",
+      });
+    }
+  };

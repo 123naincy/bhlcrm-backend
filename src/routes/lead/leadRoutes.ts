@@ -20,7 +20,8 @@ import {
   capturePublicLead,
   metaWebhookVerify,
   metaWebhookReceive,
-  getEmployeePerformance
+  getEmployeePerformance,
+  createWebsiteLead
 } from "../../controllers/lead/leadController";
 import { authorizeRoles } from "../../middleware/auth/roleMiddleware";
 import { protect } from "../../middleware/auth/authMiddleware";
@@ -86,5 +87,8 @@ router.put("/:id/status", protect, updateLeadStatus);
 router.put("/:id/note", protect, addLeadNote);
 router.get("/:id", protect, getLeadById);
 router.get("/", protect, getLeads);
-
+router.post(
+  "/website",
+  createWebsiteLead
+);
 export default router;

@@ -1,4 +1,5 @@
 import FollowUp from "../../models/followup/FollowUp";
+import { logLeadActivity } from "../../utils/logLeadActivity";
 
 export const createFollowUp = async (
   req: any,
@@ -19,12 +20,24 @@ export const createFollowUp = async (
       });
     }
 
+    const userId =
+      req.user.userId ||
+      req.user.id;
+
     const followUp = await FollowUp.create({
       leadId,
       noteType,
       note,
       nextFollowUp,
-      createdBy: req.user.userId,
+      createdBy: userId,
+    });
+
+    await logLeadActivity({
+      leadId,
+      actionType: "notes_updated",
+      newValue: noteType,
+      note,
+      performedBy: userId,
     });
 
     res.status(201).json({
