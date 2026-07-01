@@ -30,12 +30,254 @@ function sortByPlotNumber(
   );
 }
 
+const BUILDING_KEYS: Record<
+  string,
+  string
+> = {
+  "Building One": "B1",
+  "Building Two": "B2",
+};
+
+/** Phase 2 · Ground Floor — positions 1–16 in floor-plan order */
+const GROUND_FLOOR_LAYOUT_SUFFIXES = [
+  "BLK-01",
+  "BLK-02",
+  "BLK-03",
+  "BLK-04",
+  "1BHK-01",
+  "1BHK-02",
+  "BLK-05",
+  "BLK-06",
+  "BLK-07",
+  "BLK-08",
+  "BLK-09",
+  "BLK-10",
+  "BLK-11",
+  "1BHK-03",
+  "1BHK-04",
+  "BLK-12",
+];
+
+/** Building upper floors — same layout on 1F/2F/3F */
+const BUILDING_UPPER_FLOOR_SUFFIXES = [
+  "BLK-01",
+  "BLK-02",
+  "BLK-03",
+  "BLK-04",
+  "1BHK-01",
+  "1BHK-02",
+  "BLK-05",
+  "BLK-06",
+  "BLK-07",
+  "BLK-08",
+  "BLK-09",
+  "BLK-10",
+  "BLK-11",
+  "BLK-12",
+  "1BHK-03",
+  "1BHK-04",
+  "BLK-13",
+];
+
+type BuildingFloorLayout = {
+  block: string;
+  floor: string;
+  floorKey: string;
+  positionStart: number;
+  suffixes: string[];
+};
+
+const BUILDING_FLOOR_LAYOUTS: BuildingFloorLayout[] =
+  [
+    {
+      block: "Building One",
+      floor: "Ground Floor",
+      floorKey: "GF",
+      positionStart: 1,
+      suffixes:
+        GROUND_FLOOR_LAYOUT_SUFFIXES,
+    },
+    {
+      block: "Building Two",
+      floor: "Ground Floor",
+      floorKey: "GF",
+      positionStart: 1,
+      suffixes:
+        GROUND_FLOOR_LAYOUT_SUFFIXES,
+    },
+    {
+      block: "Building One",
+      floor: "First Floor",
+      floorKey: "1F",
+      positionStart: 101,
+      suffixes:
+        BUILDING_UPPER_FLOOR_SUFFIXES,
+    },
+    {
+      block: "Building One",
+      floor: "Second Floor",
+      floorKey: "2F",
+      positionStart: 201,
+      suffixes:
+        BUILDING_UPPER_FLOOR_SUFFIXES,
+    },
+    {
+      block: "Building One",
+      floor: "Third Floor",
+      floorKey: "3F",
+      positionStart: 301,
+      suffixes:
+        BUILDING_UPPER_FLOOR_SUFFIXES,
+    },
+    {
+      block: "Building Two",
+      floor: "First Floor",
+      floorKey: "1F",
+      positionStart: 101,
+      suffixes:
+        BUILDING_UPPER_FLOOR_SUFFIXES,
+    },
+    {
+      block: "Building Two",
+      floor: "Second Floor",
+      floorKey: "2F",
+      positionStart: 201,
+      suffixes:
+        BUILDING_UPPER_FLOOR_SUFFIXES,
+    },
+    {
+      block: "Building Two",
+      floor: "Third Floor",
+      floorKey: "3F",
+      positionStart: 301,
+      suffixes:
+        BUILDING_UPPER_FLOOR_SUFFIXES,
+    },
+  ];
+
+function getBuildingFloorLayoutMatch(
+  item: IInventory
+) {
+  const buildingKey =
+    BUILDING_KEYS[item.block || ""];
+
+  if (!buildingKey) {
+    return null;
+  }
+
+  const inventoryNumber =
+    item.inventoryNumber || "";
+
+  for (const layout of BUILDING_FLOOR_LAYOUTS) {
+    if (
+      item.block !== layout.block ||
+      item.floor !== layout.floor
+    ) {
+      continue;
+    }
+
+    for (
+      let index = 0;
+      index < layout.suffixes.length;
+      index += 1
+    ) {
+      if (
+        inventoryNumber ===
+        `${buildingKey}-${layout.floorKey}-${layout.suffixes[index]}`
+      ) {
+        return {
+          layoutIndex: index,
+          floorPosition:
+            layout.positionStart + index,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+const COMMERCIAL_SHOP_COUNT = 9;
+
+function getCommercialLayoutMatch(
+  item: IInventory
+) {
+  if (item.block !== "Commercial") {
+    return null;
+  }
+
+  const inventoryNumber =
+    item.inventoryNumber || "";
+
+  const floorConfigs = [
+    { floor: "Ground Floor", floorKey: "GF" },
+    { floor: "First Floor", floorKey: "1F" },
+  ];
+
+  for (const config of floorConfigs) {
+    for (
+      let index = 0;
+      index < COMMERCIAL_SHOP_COUNT;
+      index += 1
+    ) {
+      const shopNo = String(
+        index + 1
+      ).padStart(2, "0");
+
+      if (
+        inventoryNumber ===
+        `COM-${config.floorKey}-${shopNo}`
+      ) {
+        return {
+          layoutIndex: index,
+          floorPosition: index + 1,
+        };
+      }
+    }
+  }
+
+  const legacyMatch =
+    inventoryNumber.match(
+      /^COM-(\d{2})$/
+    );
+
+  if (legacyMatch) {
+    const index =
+      Number.parseInt(
+        legacyMatch[1],
+        10
+      ) - 1;
+
+    return {
+      layoutIndex: index,
+      floorPosition: index + 1,
+    };
+  }
+
+  return null;
+}
+
+function getInventoryLayoutMatch(
+  item: IInventory
+) {
+  return (
+    getBuildingFloorLayoutMatch(item) ??
+    getCommercialLayoutMatch(item)
+  );
+}
+
 function mapInventoryItem(item: IInventory) {
   const inventoryNumber =
     item.inventoryNumber || "";
 
   const isPlot =
     item.inventoryType === "plot";
+
+  const layoutMatch =
+    getInventoryLayoutMatch(item);
+
+  const floorPosition =
+    layoutMatch?.floorPosition;
 
   return {
     _id: item._id,
@@ -49,6 +291,7 @@ function mapInventoryItem(item: IInventory) {
     block: item.block || "",
     tower: item.tower || "",
     floor: item.floor || "",
+    floorPosition,
     category: item.category || "",
     area: item.area,
     areaUnit: item.areaUnit || "Sq.Yd",
@@ -79,6 +322,15 @@ const PHASE2_FLOOR_ORDER = [
   "Second Floor",
   "Third Floor",
 ];
+
+function getPhase2LayoutIndex(
+  item: IInventory
+) {
+  return (
+    getInventoryLayoutMatch(item)
+      ?.layoutIndex ?? null
+  );
+}
 
 function sortPhase2Units(
   items: IInventory[]
@@ -145,6 +397,18 @@ function sortPhase2Units(
         undefined,
         { numeric: true }
       );
+    }
+
+    const layoutIndexA =
+      getPhase2LayoutIndex(a);
+    const layoutIndexB =
+      getPhase2LayoutIndex(b);
+
+    if (
+      layoutIndexA !== null &&
+      layoutIndexB !== null
+    ) {
+      return layoutIndexA - layoutIndexB;
     }
 
     return (
