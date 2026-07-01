@@ -1020,14 +1020,20 @@ export const getKanbanLeads = async (
     const query: any = {};
 
     // role restriction
-    if (user.role === "sales_executive") {
+    if (
+      user.role ===
+        "sales_executive" ||
+      user.role === "telecaller"
+    ) {
       query.assignedTo = user.userId;
     }
 
     // admin filters
     if (
       assignedTo &&
-      user.role !== "sales_executive"
+      user.role !==
+        "sales_executive" &&
+      user.role !== "telecaller"
     ) {
       query.assignedTo = assignedTo;
     }

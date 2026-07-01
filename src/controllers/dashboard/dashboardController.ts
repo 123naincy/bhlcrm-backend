@@ -721,6 +721,10 @@ export const getMyDashboard = async (
       siteVisitDone,
       won,
       lost,
+      hotLeads,
+      warmLeads,
+      coldLeads,
+      overdueFollowups,
     ] = await Promise.all([
       Lead.countDocuments({
         assignedTo: userId,
@@ -765,7 +769,60 @@ export const getMyDashboard = async (
         assignedTo: userId,
         status: "lost",
       }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        temperature: "hot",
+        status: {
+          $nin: ["won", "lost", "junk"],
+        },
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        temperature: "warm",
+        status: {
+          $nin: ["won", "lost", "junk"],
+        },
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        temperature: "cold",
+        status: {
+          $nin: ["won", "lost", "junk"],
+        },
+      }),
+
+      Lead.countDocuments({
+        assignedTo: userId,
+        followUpDate: {
+          $lt: new Date(
+            new Date().setHours(
+              0,
+              0,
+              0,
+              0
+            )
+          ),
+        },
+        status: {
+          $nin: [
+            "won",
+            "lost",
+            "junk",
+          ],
+        },
+      }),
     ]);
+
+    const conversionRate =
+      totalLeads > 0
+        ? Math.round(
+            (won / totalLeads) *
+              100
+          )
+        : 0;
 
     return res.status(200).json({
       success: true,
@@ -779,6 +836,11 @@ export const getMyDashboard = async (
       siteVisitDone,
       won,
       lost,
+      hotLeads,
+      warmLeads,
+      coldLeads,
+      overdueFollowups,
+      conversionRate,
     });
   } catch (error) {
     console.log(error);
@@ -802,7 +864,7 @@ export const getMyRecentFollowups = async (
       .sort({ updatedAt: -1 })
       .limit(10)
       .select(
-        "fullName status phone updatedAt"
+        "fullName status phone updatedAt followUpDate temperature"
       );
 
     res.status(200).json({
@@ -842,6 +904,21 @@ export const getMyMonthlyTrend = async (
 
             leads: {
               $sum: 1,
+            },
+
+            won: {
+              $sum: {
+                $cond: [
+                  {
+                    $eq: [
+                      "$status",
+                      "won",
+                    ],
+                  },
+                  1,
+                  0,
+                ],
+              },
             },
           },
         },
@@ -889,21 +966,36 @@ export const getTodayFollowups =
         999
       );
 
-      const count =
-        await Lead.countDocuments(
-          {
-            assignedTo:
-              req.user.userId,
+      const leads =
+        await Lead.find({
+          assignedTo:
+            req.user.userId,
 
-            followUpDate: {
-              $gte: start,
-              $lte: end,
-            },
-          }
-        );
+          followUpDate: {
+            $gte: start,
+            $lte: end,
+          },
+
+          status: {
+            $nin: [
+              "won",
+              "lost",
+              "junk",
+            ],
+          },
+        })
+          .sort({
+            followUpDate: 1,
+          })
+          .limit(20)
+          .select(
+            "fullName phone status followUpDate temperature"
+          );
 
       res.json({
-        count,
+        success: true,
+        count: leads.length,
+        leads,
       });
     } catch (error) {
       res.status(500).json({
@@ -912,6 +1004,135 @@ export const getTodayFollowups =
       });
     }
   };
+
+export const getMyDailyActivity =
+  async (
+    req: any,
+    res: Response
+  ) => {
+    try {
+      const userId =
+        req.user.userId;
+
+      const startDate =
+        new Date();
+
+      startDate.setDate(
+        startDate.getDate() - 6
+      );
+
+      startDate.setHours(
+        0,
+        0,
+        0,
+        0
+      );
+
+      const activityCounts =
+        await LeadActivity.aggregate(
+          [
+            {
+              $match: {
+                performedBy:
+                  new mongoose.Types.ObjectId(
+                    userId
+                  ),
+                createdAt: {
+                  $gte: startDate,
+                },
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  year: {
+                    $year:
+                      "$createdAt",
+                  },
+                  month: {
+                    $month:
+                      "$createdAt",
+                  },
+                  day: {
+                    $dayOfMonth:
+                      "$createdAt",
+                  },
+                },
+                count: {
+                  $sum: 1,
+                },
+              },
+            },
+          ]
+        );
+
+      const dayLabels = [
+        "Sun",
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat",
+      ];
+
+      const activity = [];
+
+      for (
+        let offset = 6;
+        offset >= 0;
+        offset -= 1
+      ) {
+        const date =
+          new Date();
+
+        date.setDate(
+          date.getDate() - offset
+        );
+
+        date.setHours(
+          0,
+          0,
+          0,
+          0
+        );
+
+        const match =
+          activityCounts.find(
+            (item) =>
+              item._id.day ===
+                date.getDate() &&
+              item._id.month ===
+                date.getMonth() +
+                  1 &&
+              item._id.year ===
+                date.getFullYear()
+          );
+
+        activity.push({
+          day: dayLabels[
+            date.getDay()
+          ],
+          date: date
+            .toISOString()
+            .split("T")[0],
+          activities:
+            match?.count || 0,
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        activity,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: "Server Error",
+      });
+    }
+  };
+
   export const getManagerSummary =
   async (
     req: any,
