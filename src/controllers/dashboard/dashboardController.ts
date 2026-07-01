@@ -4,6 +4,7 @@ import mongoose from "mongoose";
 import User from "../../models/auth/User";
 import LeadActivity from "../../models/activity/LeadActivity";
 import FollowUp from "../../models/followup/FollowUp";
+import CallLog from "../../models/activity/CallLog";
 
 async function getFollowUpUpdateCounts() {
   const [
@@ -79,6 +80,66 @@ async function getFollowUpUpdateCounts() {
       id,
       (counts.get(id) || 0) +
         row.count
+    );
+  }
+
+  return counts;
+}
+
+async function getCallCountsByAgent() {
+  const rows = await CallLog.aggregate([
+    {
+      $group: {
+        _id: "$agentId",
+        totalCalls: { $sum: 1 },
+      },
+    },
+  ]);
+
+  const counts = new Map<
+    string,
+    number
+  >();
+
+  for (const row of rows) {
+    if (!row._id) continue;
+
+    counts.set(
+      row._id.toString(),
+      row.totalCalls
+    );
+  }
+
+  return counts;
+}
+
+async function getStatusUpdateCountsByUser() {
+  const rows =
+    await LeadActivity.aggregate([
+      {
+        $match: {
+          actionType: "status_updated",
+        },
+      },
+      {
+        $group: {
+          _id: "$performedBy",
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+  const counts = new Map<
+    string,
+    number
+  >();
+
+  for (const row of rows) {
+    if (!row._id) continue;
+
+    counts.set(
+      row._id.toString(),
+      row.count
     );
   }
 
@@ -584,22 +645,118 @@ workedLeads: {
     const followUpCounts =
       await getFollowUpUpdateCounts();
 
+    const [
+      callCounts,
+      statusUpdateCounts,
+      teamUsers,
+    ] = await Promise.all([
+      getCallCountsByAgent(),
+      getStatusUpdateCountsByUser(),
+      User.find({
+        role: {
+          $in: [
+            "sales_executive",
+            "telecaller",
+          ],
+        },
+        $or: [
+          { isActive: true },
+          { isActive: { $exists: false } },
+        ],
+      }).select("_id fullName role"),
+    ]);
+
+    const performanceMap = new Map(
+      performance.map((row) => [
+        row.employeeId?.toString() || "",
+        row,
+      ])
+    );
+
     const performanceWithFollowUps =
-      performance.map(
-        (row) => ({
-          ...row,
+      teamUsers.map((user) => {
+        const employeeId =
+          user._id.toString();
+        const row =
+          performanceMap.get(
+            employeeId
+          );
+
+        const assignedLeads =
+          row?.assignedLeads || 0;
+        const workedLeads =
+          row?.workedLeads || 0;
+
+        return {
+          employeeId: user._id,
+          employeeName: user.fullName,
+          role: user.role,
+          assignedLeads,
+          workedLeads,
+          pendingLeads:
+            row?.pendingLeads ??
+            Math.max(
+              assignedLeads -
+                workedLeads,
+              0
+            ),
+          hotLeads:
+            row?.hotLeads || 0,
+          wonLeads:
+            row?.wonLeads || 0,
+          conversionRate:
+            row?.conversionRate ||
+            0,
+          totalCalls:
+            callCounts.get(
+              employeeId
+            ) || 0,
+          statusUpdates:
+            statusUpdateCounts.get(
+              employeeId
+            ) || 0,
           followUpUpdates:
             followUpCounts.get(
-              row.employeeId?.toString() ||
-                ""
+              employeeId
             ) || 0,
-        })
+        };
+      });
+
+    performanceWithFollowUps.sort(
+      (a, b) =>
+        b.statusUpdates -
+          a.statusUpdates ||
+        b.totalCalls - a.totalCalls ||
+        b.assignedLeads -
+          a.assignedLeads
+    );
+
+    const topPerformerRow =
+      performanceWithFollowUps.find(
+        (row) =>
+          (row.statusUpdates || 0) >
+            0 ||
+          (row.totalCalls || 0) > 0 ||
+          (row.followUpUpdates || 0) >
+            0 ||
+          (row.assignedLeads || 0) > 0
       );
 
-    const topPerformer =
-      await getTopFollowUpPerformer(
-        performanceWithFollowUps
-      );
+    const topPerformer = topPerformerRow
+      ? {
+          employeeId:
+            topPerformerRow.employeeId,
+          employeeName:
+            topPerformerRow.employeeName,
+          role: topPerformerRow.role,
+          followUpUpdates:
+            topPerformerRow.followUpUpdates,
+          totalCalls:
+            topPerformerRow.totalCalls,
+          statusUpdates:
+            topPerformerRow.statusUpdates,
+        }
+      : null;
 
     return res.status(200).json({
       success: true,
