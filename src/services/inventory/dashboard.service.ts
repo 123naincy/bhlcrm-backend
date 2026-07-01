@@ -294,7 +294,8 @@ function mapInventoryItem(item: IInventory) {
     floorPosition,
     category: item.category || "",
     area: item.area,
-    areaUnit: item.areaUnit || "Sq.Yd",
+    areaUnit: resolveAreaUnit(item),
+    basePrice: item.basePrice || 0,
     type: item.inventoryType,
     status: item.status,
     bookingId: item.bookingId
@@ -421,9 +422,50 @@ function sortPhase2Units(
   });
 }
 
+function resolveAreaUnit(
+  item: IInventory
+): string {
+  if (item.areaUnit) {
+    return item.areaUnit;
+  }
+
+  return item.phase === 2
+    ? "Sq.Ft"
+    : "Sq.Yd";
+}
+
+function resolveSummaryAreaUnit(
+  items: IInventory[]
+): string {
+  if (!items.length) {
+    return "Sq.Yd";
+  }
+
+  const allPhase1 = items.every(
+    (item) => (item.phase ?? 1) === 1
+  );
+
+  if (allPhase1) {
+    return "Sq.Yd";
+  }
+
+  const allPhase2 = items.every(
+    (item) => item.phase === 2
+  );
+
+  if (allPhase2) {
+    return "Sq.Ft";
+  }
+
+  return "Mixed";
+}
+
 function buildStatusSummary(
   items: IInventory[]
 ) {
+  const areaUnit =
+    resolveSummaryAreaUnit(items);
+
   return {
     totalUnits: items.length,
 
@@ -440,11 +482,16 @@ function buildStatusSummary(
       (item) => item.status === "sold"
     ).length,
 
-    totalArea: items.reduce(
-      (sum, item) =>
-        sum + (item.area || 0),
-      0
-    ),
+    totalArea:
+      areaUnit === "Mixed"
+        ? undefined
+        : items.reduce(
+            (sum, item) =>
+              sum + (item.area || 0),
+            0
+          ),
+
+    areaUnit,
   };
 }
 
@@ -463,6 +510,9 @@ async function getFinancialSummary(
     await Booking.find({
       inventoryId: {
         $in: inventoryIds,
+      },
+      status: {
+        $ne: "cancelled",
       },
     }).select(
       "_id totalSaleValue"
@@ -525,11 +575,16 @@ async function buildPhaseSummary(
   const statusSummary =
     buildStatusSummary(items);
 
+  const soldInventoryIds = items
+    .filter(
+      (item) =>
+        item.status === "sold"
+    )
+    .map((item) => item._id);
+
   const financials =
     await getFinancialSummary(
-      items.map(
-        (item) => item._id
-      )
+      soldInventoryIds
     );
 
   return {

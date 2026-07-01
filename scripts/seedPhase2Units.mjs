@@ -408,7 +408,7 @@ function buildBunglowUnits() {
       tower: "Single Bunglow",
       floor: "",
       area: AREAS["Single Bunglow"],
-      areaUnit: "Sq.Yd",
+      areaUnit: "Sq.Ft",
       basePrice:
         PRICES_PER_UNIT["Single Bunglow"],
       status: "available",
@@ -430,7 +430,7 @@ function buildBunglowUnits() {
       tower: "Twin Bunglow",
       floor: "",
       area: AREAS["Twin Bunglow"],
-      areaUnit: "Sq.Yd",
+      areaUnit: "Sq.Ft",
       basePrice:
         PRICES_PER_UNIT["Twin Bunglow"],
       status: "available",

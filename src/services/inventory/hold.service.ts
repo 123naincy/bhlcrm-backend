@@ -101,7 +101,7 @@ class HoldService {
         hold.inventoryId
       );
 
-      hold.deleteOne({ session });
+      await hold.deleteOne({ session });
 
       await timelineService.createTimeline(
         {
