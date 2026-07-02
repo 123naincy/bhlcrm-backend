@@ -86,39 +86,28 @@ async function getFollowUpUpdateCounts() {
   return counts;
 }
 
-async function getCallCountsByAgent() {
-  const rows = await CallLog.aggregate([
-    {
-      $group: {
-        _id: "$agentId",
-        totalCalls: { $sum: 1 },
-      },
-    },
-  ]);
+function getTodayRange() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
 
-  const counts = new Map<
-    string,
-    number
-  >();
+  const end = new Date();
+  end.setHours(23, 59, 59, 999);
 
-  for (const row of rows) {
-    if (!row._id) continue;
-
-    counts.set(
-      row._id.toString(),
-      row.totalCalls
-    );
-  }
-
-  return counts;
+  return { start, end };
 }
 
-async function getStatusUpdateCountsByUser() {
+async function getTodayStatusUpdateCountsByUser() {
+  const { start, end } = getTodayRange();
+
   const rows =
     await LeadActivity.aggregate([
       {
         $match: {
           actionType: "status_updated",
+          createdAt: {
+            $gte: start,
+            $lte: end,
+          },
         },
       },
       {
@@ -140,6 +129,123 @@ async function getStatusUpdateCountsByUser() {
     counts.set(
       row._id.toString(),
       row.count
+    );
+  }
+
+  return counts;
+}
+
+async function getTodayCallCountsOnStatusChangedLeads() {
+  const { start, end } = getTodayRange();
+
+  const statusRows =
+    await LeadActivity.aggregate([
+      {
+        $match: {
+          actionType: "status_updated",
+          createdAt: {
+            $gte: start,
+            $lte: end,
+          },
+          performedBy: {
+            $exists: true,
+            $ne: null,
+          },
+        },
+      },
+      {
+        $group: {
+          _id: "$performedBy",
+          leadIds: {
+            $addToSet: "$leadId",
+          },
+        },
+      },
+    ]);
+
+  const leadIdsByEmployee = new Map<
+    string,
+    Set<string>
+  >();
+
+  for (const row of statusRows) {
+    if (!row._id) continue;
+
+    leadIdsByEmployee.set(
+      row._id.toString(),
+      new Set(
+        (row.leadIds || []).map(
+          (id: mongoose.Types.ObjectId) =>
+            id.toString()
+        )
+      )
+    );
+  }
+
+  if (leadIdsByEmployee.size === 0) {
+    return new Map<string, number>();
+  }
+
+  const allLeadIds = [
+    ...new Set(
+      statusRows.flatMap((row) =>
+        (row.leadIds || []).map(
+          (id: mongoose.Types.ObjectId) =>
+            id
+        )
+      )
+    ),
+  ];
+
+  const callRows =
+    await CallLog.aggregate([
+      {
+        $match: {
+          callDate: {
+            $gte: start,
+            $lte: end,
+          },
+          leadId: { $in: allLeadIds },
+        },
+      },
+      {
+        $group: {
+          _id: {
+            agentId: "$agentId",
+            leadId: "$leadId",
+          },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+  const counts = new Map<
+    string,
+    number
+  >();
+
+  for (const row of callRows) {
+    const agentId =
+      row._id?.agentId?.toString();
+    const leadId =
+      row._id?.leadId?.toString();
+
+    if (!agentId || !leadId) continue;
+
+    const allowedLeads =
+      leadIdsByEmployee.get(agentId);
+
+    if (
+      !allowedLeads ||
+      !allowedLeads.has(leadId)
+    ) {
+      continue;
+    }
+
+    counts.set(
+      agentId,
+      (counts.get(agentId) || 0) +
+        row.count
     );
   }
 
@@ -645,13 +751,16 @@ workedLeads: {
     const followUpCounts =
       await getFollowUpUpdateCounts();
 
+    const { start: todayStart } =
+      getTodayRange();
+
     const [
       callCounts,
       statusUpdateCounts,
       teamUsers,
     ] = await Promise.all([
-      getCallCountsByAgent(),
-      getStatusUpdateCountsByUser(),
+      getTodayCallCountsOnStatusChangedLeads(),
+      getTodayStatusUpdateCountsByUser(),
       User.find({
         role: {
           $in: [
@@ -684,22 +793,13 @@ workedLeads: {
 
         const assignedLeads =
           row?.assignedLeads || 0;
-        const workedLeads =
-          row?.workedLeads || 0;
 
         return {
           employeeId: user._id,
           employeeName: user.fullName,
           role: user.role,
           assignedLeads,
-          workedLeads,
-          pendingLeads:
-            row?.pendingLeads ??
-            Math.max(
-              assignedLeads -
-                workedLeads,
-              0
-            ),
+          pendingLeads: assignedLeads,
           hotLeads:
             row?.hotLeads || 0,
           wonLeads:
@@ -760,6 +860,10 @@ workedLeads: {
 
     return res.status(200).json({
       success: true,
+      period: "today",
+      reportDate: todayStart
+        .toISOString()
+        .slice(0, 10),
       count:
         performanceWithFollowUps.length,
       performance:
