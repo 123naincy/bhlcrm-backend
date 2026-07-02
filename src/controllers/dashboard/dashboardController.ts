@@ -93,7 +93,12 @@ function getTodayRange() {
   const end = new Date();
   end.setHours(23, 59, 59, 999);
 
-  return { start, end };
+  return {
+    start,
+    end,
+    startOfToday: start,
+    endOfToday: end,
+  };
 }
 
 async function getTodayStatusUpdateCountsByUser() {
@@ -135,117 +140,37 @@ async function getTodayStatusUpdateCountsByUser() {
   return counts;
 }
 
-async function getTodayCallCountsOnStatusChangedLeads() {
+async function getTodayCallCountsByAgent() {
   const { start, end } = getTodayRange();
 
-  const statusRows =
-    await LeadActivity.aggregate([
-      {
-        $match: {
-          actionType: "status_updated",
-          createdAt: {
-            $gte: start,
-            $lte: end,
-          },
-          performedBy: {
-            $exists: true,
-            $ne: null,
-          },
+  const rows = await CallLog.aggregate([
+    {
+      $match: {
+        callDate: {
+          $gte: start,
+          $lte: end,
         },
       },
-      {
-        $group: {
-          _id: "$performedBy",
-          leadIds: {
-            $addToSet: "$leadId",
-          },
-        },
+    },
+    {
+      $group: {
+        _id: "$agentId",
+        count: { $sum: 1 },
       },
-    ]);
-
-  const leadIdsByEmployee = new Map<
-    string,
-    Set<string>
-  >();
-
-  for (const row of statusRows) {
-    if (!row._id) continue;
-
-    leadIdsByEmployee.set(
-      row._id.toString(),
-      new Set(
-        (row.leadIds || []).map(
-          (id: mongoose.Types.ObjectId) =>
-            id.toString()
-        )
-      )
-    );
-  }
-
-  if (leadIdsByEmployee.size === 0) {
-    return new Map<string, number>();
-  }
-
-  const allLeadIds = [
-    ...new Set(
-      statusRows.flatMap((row) =>
-        (row.leadIds || []).map(
-          (id: mongoose.Types.ObjectId) =>
-            id
-        )
-      )
-    ),
-  ];
-
-  const callRows =
-    await CallLog.aggregate([
-      {
-        $match: {
-          callDate: {
-            $gte: start,
-            $lte: end,
-          },
-          leadId: { $in: allLeadIds },
-        },
-      },
-      {
-        $group: {
-          _id: {
-            agentId: "$agentId",
-            leadId: "$leadId",
-          },
-          count: { $sum: 1 },
-        },
-      },
-    ]);
+    },
+  ]);
 
   const counts = new Map<
     string,
     number
   >();
 
-  for (const row of callRows) {
-    const agentId =
-      row._id?.agentId?.toString();
-    const leadId =
-      row._id?.leadId?.toString();
-
-    if (!agentId || !leadId) continue;
-
-    const allowedLeads =
-      leadIdsByEmployee.get(agentId);
-
-    if (
-      !allowedLeads ||
-      !allowedLeads.has(leadId)
-    ) {
-      continue;
-    }
+  for (const row of rows) {
+    if (!row._id) continue;
 
     counts.set(
-      agentId,
-      (counts.get(agentId) || 0) +
-        row.count
+      row._id.toString(),
+      row.count
     );
   }
 
@@ -332,19 +257,6 @@ async function getTopFollowUpPerformer(
   }
 
   return null;
-}
-
-function getTodayRange() {
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-
-  const endOfToday = new Date();
-  endOfToday.setHours(23, 59, 59, 999);
-
-  return {
-    startOfToday,
-    endOfToday,
-  };
 }
 
 async function countTodayStatusUpdates() {
@@ -759,7 +671,7 @@ workedLeads: {
       statusUpdateCounts,
       teamUsers,
     ] = await Promise.all([
-      getTodayCallCountsOnStatusChangedLeads(),
+      getTodayCallCountsByAgent(),
       getTodayStatusUpdateCountsByUser(),
       User.find({
         role: {
