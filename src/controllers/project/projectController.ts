@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
 import Project from "../../models/project/Project";
+import {
+  getBrandId,
+  getBrandQuery,
+  isAdminRole,
+} from "../../utils/getBrandQuery";
 
 export const createProject = async (
   req: any,
@@ -13,9 +18,7 @@ export const createProject = async (
       description,
     } = req.body;
 
-    const brandId =
-      req.user?.brandId ||
-      req.user?.userId;
+    const brandId = getBrandId(req.user);
 
     if (!name) {
       return res.status(400).json({
@@ -25,10 +28,11 @@ export const createProject = async (
     }
 
     const existing =
-      await Project.findOne({
-        name,
-        brandId,
-      });
+      await Project.findOne(
+        isAdminRole(req.user?.role)
+          ? { name }
+          : { name, brandId }
+      );
 
     if (existing) {
       return res.status(400).json({
@@ -68,14 +72,10 @@ export const getProjects =
     res: Response
   ) => {
     try {
-      const brandId =
-        req.user?.brandId ||
-        req.user?.userId;
-
       const projects =
-        await Project.find({
-          brandId,
-        }).sort({
+        await Project.find(
+          getBrandQuery(req.user)
+        ).sort({
           createdAt: -1,
         });
 

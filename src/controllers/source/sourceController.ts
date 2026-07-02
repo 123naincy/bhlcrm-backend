@@ -1,5 +1,10 @@
 import { Response } from "express";
 import LeadSourceMapping from "../../models/source/LeadSourceMapping";
+import {
+  getBrandId,
+  getBrandQuery,
+  isAdminRole,
+} from "../../utils/getBrandQuery";
 
 export const createSourceMapping =
   async (
@@ -14,9 +19,7 @@ export const createSourceMapping =
         projectName,
       } = req.body;
 
-      const brandId =
-        req.user?.brandId ||
-        req.user?.userId;
+      const brandId = getBrandId(req.user);
 
       if (
         !sourceType ||
@@ -32,11 +35,16 @@ export const createSourceMapping =
 
       const existing =
         await LeadSourceMapping.findOne(
-          {
-            sourceType,
-            identifier,
-            brandId,
-          }
+          isAdminRole(req.user?.role)
+            ? {
+                sourceType,
+                identifier,
+              }
+            : {
+                sourceType,
+                identifier,
+                brandId,
+              }
         );
 
       if (existing) {
@@ -79,15 +87,9 @@ export const getSourceMappings =
     res: Response
   ) => {
     try {
-      const brandId =
-        req.user?.brandId ||
-        req.user?.userId;
-
       const mappings =
         await LeadSourceMapping.find(
-          {
-            brandId,
-          }
+          getBrandQuery(req.user)
         )
           .populate(
             "projectId",
