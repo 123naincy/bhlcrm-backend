@@ -21,7 +21,8 @@ import {
   metaWebhookVerify,
   metaWebhookReceive,
   getEmployeePerformance,
-  createWebsiteLead
+  createWebsiteLead,
+  deleteLead,
 } from "../../controllers/lead/leadController";
 import { authorizeRoles } from "../../middleware/auth/roleMiddleware";
 import { protect } from "../../middleware/auth/authMiddleware";
@@ -85,6 +86,12 @@ router.put(
 );
 router.put("/:id/status", protect, updateLeadStatus);
 router.put("/:id/note", protect, addLeadNote);
+router.delete(
+  "/:id",
+  protect,
+  authorizeRoles("super_admin"),
+  deleteLead
+);
 router.get("/:id", protect, getLeadById);
 router.get("/", protect, getLeads);
 router.post(

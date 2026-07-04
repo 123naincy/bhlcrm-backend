@@ -4,6 +4,8 @@ import User from "../../models/auth/User";
 import { logLeadActivity } from "../../utils/logLeadActivity";
 import LeadActivity from "../../models/activity/LeadActivity";
 import Notification from "../../models/Notification";
+import FollowUp from "../../models/followup/FollowUp";
+import CallLog from "../../models/activity/CallLog";
 import { createNotification } from "../../utils/notificationHelper";
 import ExcelJS from "exceljs";
 import XLSX from "xlsx";
@@ -2258,3 +2260,48 @@ export const createWebsiteLead =
       });
     }
   };
+
+export const deleteLead = async (
+  req: any,
+  res: Response
+) => {
+  try {
+    if (req.user.role !== "super_admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    const { id } = req.params;
+
+    const lead = await Lead.findById(id);
+
+    if (!lead) {
+      return res.status(404).json({
+        success: false,
+        message: "Lead not found",
+      });
+    }
+
+    await Promise.all([
+      LeadActivity.deleteMany({ leadId: id }),
+      FollowUp.deleteMany({ leadId: id }),
+      CallLog.deleteMany({ leadId: id }),
+    ]);
+
+    await Lead.findByIdAndDelete(id);
+
+    res.status(200).json({
+      success: true,
+      message: "Lead deleted successfully",
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete lead",
+    });
+  }
+};
