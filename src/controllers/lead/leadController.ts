@@ -12,6 +12,10 @@ import XLSX from "xlsx";
 import axios from "axios";
 import { detectProjectFromSource } from "../../utils/detectProjectFromSource";
 import { extractProjectName } from "../../utils/leadProjectUtils";
+import {
+  getScheduledDate,
+  requiresScheduleDate,
+} from "../../utils/leadScheduleUtils";
 
 const populateLeadQuery = (query: any) =>
   query
@@ -27,6 +31,7 @@ const serializeLead = (lead: any) => {
   return {
     ...doc,
     projectName: extractProjectName(doc),
+    scheduledDate: getScheduledDate(doc),
   };
 };
 
@@ -536,6 +541,7 @@ export const reassignLead = async (
     // update lead
     lead.assignedTo = employee._id as any;
     lead.status = "assigned";
+    lead.updatedAt = new Date();
 
     await lead.save();
 
@@ -609,6 +615,7 @@ export const updateLead = async (
       status,
       temperature,
       followUpDate,
+      scheduledDate,
       notes,
     } = req.body;
 
@@ -648,10 +655,35 @@ export const updateLead = async (
     const oldTemperature =
       lead.temperature;
     const oldFollowUpDate =
-      lead.followUpDate?.toString() ||
+      lead.followUpDate?.toISOString() ||
       "";
+    const oldScheduledDate =
+      getScheduledDate(lead);
     const oldNotes =
       lead.notes || "";
+
+    const nextStatus =
+      status !== undefined && status
+        ? status
+        : lead.status;
+
+    if (
+      requiresScheduleDate(nextStatus)
+    ) {
+      const nextScheduledDate =
+        scheduledDate !== undefined
+          ? scheduledDate
+          : getScheduledDate(lead);
+
+      if (!nextScheduledDate) {
+        return res.status(400).json({
+          message:
+            "Schedule date required for this status",
+        });
+      }
+    }
+
+    let worked = false;
 
     // managers/admins to notify
     const managers =
@@ -667,114 +699,240 @@ export const updateLead = async (
       });
 
     // STATUS UPDATE
-    if (
-      status &&
-      status !== oldStatus
-    ) {
-      lead.status = status;
-      lead.updatedAt = new Date();
+    if (status !== undefined && status) {
+      worked = true;
 
-      await logLeadActivity({
-        leadId:
-          lead._id.toString(),
-        actionType:
-          "status_updated",
-        oldValue: oldStatus,
-        newValue: status,
-        performedBy:
-          user.userId,
-      });
+      if (status !== oldStatus) {
+        lead.status = status;
 
-      // notify managers
-      for (const manager of managers) {
-        await createNotification({
-          title:
-            status === "won"
-              ? "Deal Won 🎉"
-              : status === "lost"
-              ? "Lead Lost ⚠"
-              : "Lead Status Updated",
-          message:
-            status === "won"
-              ? `${lead.fullName} converted successfully`
-              : status ===
-                "lost"
-              ? `${lead.fullName} marked as lost`
-              : `${lead.fullName} moved to ${status}`,
-          type:
-            status === "won"
-              ? "deal_won"
-              : status === "lost"
-              ? "deal_lost"
-              : "lead_status_changed",
-          userId:
-            manager._id.toString(),
-          meta: {
-            leadId: lead._id,
-          },
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "status_updated",
+          oldValue: oldStatus,
+          newValue: status,
+          performedBy:
+            user.userId,
+        });
+
+        // notify managers
+        for (const manager of managers) {
+          await createNotification({
+            title:
+              status === "won"
+                ? "Deal Won 🎉"
+                : status === "lost"
+                ? "Lead Lost ⚠"
+                : "Lead Status Updated",
+            message:
+              status === "won"
+                ? `${lead.fullName} converted successfully`
+                : status ===
+                  "lost"
+                ? `${lead.fullName} marked as lost`
+                : `${lead.fullName} moved to ${status}`,
+            type:
+              status === "won"
+                ? "deal_won"
+                : status === "lost"
+                ? "deal_lost"
+                : "lead_status_changed",
+            userId:
+              manager._id.toString(),
+            meta: {
+              leadId: lead._id,
+            },
+          });
+        }
+      } else {
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "status_updated",
+          oldValue: oldStatus,
+          newValue: status,
+          note: `Lead worked again. Status remained ${status}.`,
+          performedBy:
+            user.userId,
         });
       }
     }
 
     // TEMPERATURE
     if (
-      temperature &&
-      temperature !==
-        oldTemperature
+      temperature !== undefined &&
+      temperature
     ) {
-      lead.temperature =
-        temperature;
+      worked = true;
 
-      await logLeadActivity({
-        leadId:
-          lead._id.toString(),
-        actionType:
-          "temperature_updated",
-        oldValue:
-          oldTemperature,
-        newValue:
-          temperature,
-        performedBy:
-          user.userId,
-      });
+      if (
+        temperature !==
+          oldTemperature
+      ) {
+        lead.temperature =
+          temperature;
+
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "temperature_updated",
+          oldValue:
+            oldTemperature,
+          newValue:
+            temperature,
+          performedBy:
+            user.userId,
+        });
+      } else {
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "temperature_updated",
+          oldValue:
+            oldTemperature,
+          newValue:
+            temperature,
+          note: `Lead worked again. Temperature remained ${temperature}.`,
+          performedBy:
+            user.userId,
+        });
+      }
     }
 
     // FOLLOW UP
-    if (followUpDate) {
-      lead.followUpDate =
-        followUpDate;
+    if (followUpDate !== undefined) {
+      worked = true;
 
-      await logLeadActivity({
-        leadId:
-          lead._id.toString(),
-        actionType:
-          "followup_updated",
-        oldValue:
-          oldFollowUpDate,
-        newValue:
-          followUpDate,
-        performedBy:
-          user.userId,
-      });
+      const nextFollowUpDate = followUpDate
+        ? new Date(followUpDate)
+        : undefined;
+      const nextFollowUpValue =
+        followUpDate || "";
+
+      if (
+        nextFollowUpValue !==
+        oldFollowUpDate
+      ) {
+        lead.followUpDate =
+          nextFollowUpDate;
+
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "followup_updated",
+          oldValue:
+            oldFollowUpDate,
+          newValue:
+            nextFollowUpValue,
+          performedBy:
+            user.userId,
+        });
+      } else {
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "followup_updated",
+          oldValue:
+            oldFollowUpDate,
+          newValue:
+            nextFollowUpValue,
+          note:
+            "Lead worked again. Follow-up date unchanged.",
+          performedBy:
+            user.userId,
+        });
+      }
+    }
+
+    // SCHEDULE DATE (stored in existing extraFields)
+    if (scheduledDate !== undefined) {
+      worked = true;
+
+      const nextScheduledValue =
+        scheduledDate || "";
+
+      if (
+        nextScheduledValue !==
+        oldScheduledDate
+      ) {
+        lead.extraFields = {
+          ...(lead.extraFields || {}),
+          scheduledDate:
+            nextScheduledValue,
+        };
+        lead.markModified("extraFields");
+
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "schedule_updated",
+          oldValue:
+            oldScheduledDate,
+          newValue:
+            nextScheduledValue,
+          performedBy:
+            user.userId,
+        });
+      } else {
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "schedule_updated",
+          oldValue:
+            oldScheduledDate,
+          newValue:
+            nextScheduledValue,
+          note:
+            "Lead worked again. Schedule date unchanged.",
+          performedBy:
+            user.userId,
+        });
+      }
     }
 
     // NOTES
-    if (
-      notes &&
-      notes !== oldNotes
-    ) {
-      lead.notes = notes;
+    if (notes !== undefined) {
+      worked = true;
 
-      await logLeadActivity({
-        leadId:
-          lead._id.toString(),
-        actionType:
-          "notes_updated",
-        oldValue: oldNotes,
-        newValue: notes,
-        performedBy:
-          user.userId,
-      });
+      if (notes !== oldNotes) {
+        lead.notes = notes;
+
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "notes_updated",
+          oldValue: oldNotes,
+          newValue: notes,
+          performedBy:
+            user.userId,
+        });
+      } else {
+        await logLeadActivity({
+          leadId:
+            lead._id.toString(),
+          actionType:
+            "notes_updated",
+          oldValue: oldNotes,
+          newValue: notes,
+          note:
+            "Lead worked again. Notes unchanged.",
+          performedBy:
+            user.userId,
+        });
+      }
+    }
+
+    if (worked) {
+      lead.updatedAt = new Date();
     }
 
     await lead.save();
@@ -782,12 +940,17 @@ export const updateLead = async (
     res.status(200).json({
       message:
         "Lead updated successfully",
-      lead,
+      lead: serializeLead(lead),
     });
   } catch (error) {
+    console.error("updateLead failed:", error);
+
     res.status(500).json({
       message: "Server error",
-      error,
+      error:
+        error instanceof Error
+          ? error.message
+          : error,
     });
   }
 };
@@ -1790,9 +1953,24 @@ export const capturePublicLead =
                 user.userId,
               status:
                 "assigned",
+              updatedAt: new Date(),
             },
           }
         );
+
+      for (const leadId of leadIds) {
+        await logLeadActivity({
+          leadId: leadId.toString(),
+          actionType:
+            "lead_reassigned",
+          newValue:
+            assignedTo.toString(),
+          note:
+            "Lead bulk assigned",
+          performedBy:
+            user.userId,
+        });
+      }
 
       res.status(200).json({
         success: true,
@@ -1913,12 +2091,14 @@ export const updateLeadStatus =
       const oldStatus =
         lead.status;
 
-      lead.status = status;
-      lead.updatedAt = new Date();
+      if (oldStatus !== status) {
+        lead.status = status;
+      }
 
+      lead.updatedAt = new Date();
       await lead.save();
 
-      await LeadActivity.create({
+      await logLeadActivity({
         leadId:
           lead._id.toString(),
         actionType:
@@ -1927,7 +2107,10 @@ export const updateLeadStatus =
           oldStatus,
         newValue:
           status,
-        note: `Status changed from ${oldStatus} to ${status}`,
+        note:
+          oldStatus === status
+            ? `Lead worked again. Status remained ${status}.`
+            : `Status changed from ${oldStatus} to ${status}`,
         performedBy:
           user.userId,
       });
@@ -1936,7 +2119,7 @@ export const updateLeadStatus =
         success: true,
         message:
           "Status updated successfully",
-        lead,
+        lead: serializeLead(lead),
       });
     } catch (error) {
       console.error(error);
@@ -1983,10 +2166,11 @@ export const addLeadNote =
         lead.notes || "";
 
       lead.notes = note;
+      lead.updatedAt = new Date();
 
       await lead.save();
 
-      await LeadActivity.create({
+      await logLeadActivity({
         leadId:
           lead._id.toString(),
         actionType:
@@ -2038,31 +2222,33 @@ export const addLeadNote =
         assignedTo: employeeId,
       });
 
-    const workedLeadIds =
-      await LeadActivity.find({
-        performedBy: employeeId,
-        createdAt: {
-          $gte: new Date(fromDate),
-          $lte: new Date(
-            new Date(toDate).setHours(
-              23,
-              59,
-              59,
-              999
-            )
-          ),
-        },
-      }).distinct("leadId");
+    const rangeStart = new Date(fromDate);
+    const rangeEnd = new Date(
+      new Date(toDate).setHours(
+        23,
+        59,
+        59,
+        999
+      )
+    );
 
     const workedLeads =
-      workedLeadIds.length;
+      await Lead.countDocuments({
+        assignedTo: employeeId,
+        updatedAt: {
+          $gte: rangeStart,
+          $lte: rangeEnd,
+        },
+      });
 
     const pendingLeads =
       assignedLeads - workedLeads;
 
     const leads = await Lead.find({
-      _id: {
-        $in: workedLeadIds,
+      assignedTo: employeeId,
+      updatedAt: {
+        $gte: rangeStart,
+        $lte: rangeEnd,
       },
     })
       .populate(

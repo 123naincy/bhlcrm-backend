@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import CallLog from "../../models/activity/CallLog";
+import { logLeadActivity } from "../../utils/logLeadActivity";
 
 interface AuthRequest extends Request {
   user?: any;
@@ -36,6 +37,18 @@ console.log("CALL LOG ID:", req.params.callLogId);
 
         callDate: new Date(),
       });
+
+    if (leadId) {
+      await logLeadActivity({
+        leadId: leadId.toString(),
+        actionType: "notes_updated",
+        newValue: callType || "call",
+        note: recordingUrl
+          ? "Call recording saved"
+          : "Call log saved",
+        performedBy: req.user.userId,
+      });
+    }
 
     console.log(
       "SAVED CALL LOG =",

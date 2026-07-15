@@ -1,4 +1,5 @@
 import LeadActivity from "../models/activity/LeadActivity";
+import { touchLeadUpdatedAt } from "./touchLeadUpdatedAt";
 
 interface LogActivityParams {
   leadId: string;
@@ -8,7 +9,8 @@ interface LogActivityParams {
     | "status_updated"
     | "temperature_updated"
     | "followup_updated"
-    | "notes_updated";
+    | "notes_updated"
+    | "schedule_updated";
   oldValue?: string;
   newValue?: string;
   note?: string;
@@ -32,6 +34,8 @@ export const logLeadActivity = async ({
       note,
       performedBy,
     });
+
+    await touchLeadUpdatedAt(leadId);
   } catch (error) {
     console.error("Lead activity log failed:", error);
   }

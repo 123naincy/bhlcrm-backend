@@ -26,6 +26,7 @@ const LeadActivitySchema: Schema = new Schema(
         "temperature_updated",
         "followup_updated",
         "notes_updated",
+        "schedule_updated",
       ],
       required: true,
     },

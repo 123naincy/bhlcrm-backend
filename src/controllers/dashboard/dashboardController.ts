@@ -5,6 +5,12 @@ import User from "../../models/auth/User";
 import LeadActivity from "../../models/activity/LeadActivity";
 import FollowUp from "../../models/followup/FollowUp";
 import CallLog from "../../models/activity/CallLog";
+import {
+  getScheduledDate,
+  isDateToday,
+  mapLeadScheduleFields,
+  SCHEDULE_STATUSES,
+} from "../../utils/leadScheduleUtils";
 
 async function getFollowUpUpdateCounts() {
   const [
@@ -105,11 +111,14 @@ async function getTodayStatusUpdateCountsByUser() {
   const { start, end } = getTodayRange();
 
   const rows =
-    await LeadActivity.aggregate([
+    await Lead.aggregate([
       {
         $match: {
-          actionType: "status_updated",
-          createdAt: {
+          assignedTo: {
+            $exists: true,
+            $ne: null,
+          },
+          updatedAt: {
             $gte: start,
             $lte: end,
           },
@@ -117,7 +126,7 @@ async function getTodayStatusUpdateCountsByUser() {
       },
       {
         $group: {
-          _id: "$performedBy",
+          _id: "$assignedTo",
           count: { $sum: 1 },
         },
       },
@@ -284,19 +293,15 @@ async function countTodayStatusUpdates() {
     return 0;
   }
 
-  return LeadActivity.countDocuments(
-    {
-      actionType:
-        "status_updated",
-      performedBy: {
-        $in: teamIds,
-      },
-      createdAt: {
-        $gte: startOfToday,
-        $lte: endOfToday,
-      },
-    }
-  );
+  return Lead.countDocuments({
+    assignedTo: {
+      $in: teamIds,
+    },
+    updatedAt: {
+      $gte: startOfToday,
+      $lte: endOfToday,
+    },
+  });
 }
 
 async function countPendingAssignedLeads() {
@@ -1171,6 +1176,52 @@ export const getTodayFollowups =
         leads,
       });
     } catch (error) {
+      res.status(500).json({
+        message:
+          "Server Error",
+      });
+    }
+  };
+
+export const getTodaySchedules =
+  async (
+    req: any,
+    res: Response
+  ) => {
+    try {
+      const userId =
+        req.user.userId;
+
+      const leads =
+        await Lead.find({
+          assignedTo: userId,
+          status: {
+            $in: SCHEDULE_STATUSES,
+          },
+        })
+          .select(
+            "fullName phone status temperature extraFields updatedAt"
+          )
+          .sort({ updatedAt: -1 });
+
+      const todayLeads =
+        leads
+          .filter((lead) =>
+            isDateToday(
+              getScheduledDate(lead)
+            )
+          )
+          .map(mapLeadScheduleFields);
+
+      res.json({
+        success: true,
+        count:
+          todayLeads.length,
+        leads: todayLeads,
+      });
+    } catch (error) {
+      console.error(error);
+
       res.status(500).json({
         message:
           "Server Error",

@@ -93,6 +93,20 @@ export const updateFollowUp = async (
         }
       );
 
+    if (followUp?.leadId) {
+      const userId =
+        req.user.userId ||
+        req.user.id;
+
+      await logLeadActivity({
+        leadId: followUp.leadId.toString(),
+        actionType: "notes_updated",
+        newValue: followUp.noteType,
+        note: followUp.note,
+        performedBy: userId,
+      });
+    }
+
     res.status(200).json({
       success: true,
       followUp,
