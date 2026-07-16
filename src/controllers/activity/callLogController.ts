@@ -137,27 +137,3 @@ export const getLeadCallLogs =
       });
     }
   };
-
-  export const playRecording = async (
-  req: any,
-  res: any
-) => {
-  const callLog =
-    await CallLog.findById(
-      req.params.callLogId
-    );
-
-  if (!callLog) {
-    return res
-      .status(404)
-      .json({
-        message:
-          "Recording not found",
-      });
-  }
-
-  res.json({
-    success: true,
-    url: callLog.recordingUrl,
-  });
-};

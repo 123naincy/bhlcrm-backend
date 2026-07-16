@@ -1,12 +1,16 @@
 import { Request, Response } from "express";
 import CallLog from "../../models/activity/CallLog";
-
 import {
   S3Client,
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
-
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import {
+  guessRecordingContentType,
+  isPlayableHttpUrl,
+  isPresignedS3Url,
+  parseS3RecordingLocation,
+} from "../../utils/parseS3RecordingLocation";
 
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
@@ -19,76 +23,187 @@ const s3Client = new S3Client({
     : undefined,
 });
 
-export const playRecording = async (
+async function getCallLogRecording(
+  callLogId: string
+) {
+  const callLog = await CallLog.findById(callLogId);
+
+  if (!callLog) {
+    return {
+      error: {
+        status: 404,
+        message: "Recording not found",
+      },
+    };
+  }
+
+  const recordingUrl = callLog.recordingUrl?.trim();
+
+  if (!recordingUrl) {
+    return {
+      error: {
+        status: 404,
+        message: "No recording URL for this call log",
+      },
+    };
+  }
+
+  return { callLog, recordingUrl };
+}
+
+async function buildPlaybackUrl(
+  recordingUrl: string
+) {
+  if (isPresignedS3Url(recordingUrl)) {
+    return recordingUrl;
+  }
+
+  const location =
+    parseS3RecordingLocation(recordingUrl);
+
+  if (!location) {
+    if (isPlayableHttpUrl(recordingUrl)) {
+      return recordingUrl;
+    }
+
+    return null;
+  }
+
+  const command = new GetObjectCommand({
+    Bucket: location.bucket,
+    Key: location.key,
+    ResponseContentDisposition: "inline",
+    ResponseContentType: guessRecordingContentType(
+      location.key
+    ),
+  });
+
+  return getSignedUrl(s3Client, command, {
+    expiresIn: 3600,
+  });
+}
+
+export const streamRecording = async (
   req: Request,
   res: Response
 ) => {
   try {
-    const callLog = await CallLog.findById(
-      req.params.callLogId
+    const result = await getCallLogRecording(
+      String(req.params.callLogId)
     );
 
-    if (!callLog) {
-      return res.status(404).json({
+    if (result.error) {
+      return res.status(result.error.status).json({
         success: false,
-        message: "Recording not found",
-      });
-    }
-console.log("PLAY ROUTE LOADED");
-    const recordingUrl = callLog.recordingUrl;
-
-    if (!recordingUrl) {
-      return res.status(404).json({
-        success: false,
-        message: "No recording URL for this call log",
+        message: result.error.message,
       });
     }
 
-    // If the stored URL is not an S3 URL, return it directly
-    if (!recordingUrl.includes(".amazonaws.com/")) {
-      return res.json({ success: true, url: recordingUrl });
-    }
+    const recordingUrl = result.recordingUrl!;
+    const location =
+      parseS3RecordingLocation(recordingUrl);
 
-    const parts = recordingUrl.split(".amazonaws.com/");
-    if (!parts[1]) {
+    if (!location) {
+      if (isPlayableHttpUrl(recordingUrl)) {
+        return res.redirect(recordingUrl);
+      }
+
       return res.status(400).json({
         success: false,
-        message: "Invalid S3 recording URL",
+        message: "Recording is not stored in S3",
       });
     }
 
-    const key = parts[1];
-
-    const bucket = process.env.AWS_BUCKET_NAME;
-    if (!bucket) {
-      console.error("AWS_BUCKET_NAME not configured");
-      return res.status(500).json({
-        success: false,
-        message: "Server misconfiguration: missing S3 bucket",
-      });
-    }
-
-    const command = new GetObjectCommand({
-      Bucket: bucket,
-      Key: key,
-    });
-
-    console.log("BUCKET:", bucket);
-    console.log("KEY:", key);
-
-    const signedUrl = await getSignedUrl(
-      s3Client,
-      command,
-      { expiresIn: 3600 }
+    const object = await s3Client.send(
+      new GetObjectCommand({
+        Bucket: location.bucket,
+        Key: location.key,
+      })
     );
 
-    console.log("SIGNED URL:", signedUrl);
-    return res.json({ success: true, url: signedUrl });
+    if (!object.Body) {
+      return res.status(404).json({
+        success: false,
+        message: "Recording file missing in storage",
+      });
+    }
+
+    res.setHeader(
+      "Content-Type",
+      object.ContentType ||
+        guessRecordingContentType(location.key)
+    );
+    res.setHeader(
+      "Content-Disposition",
+      "inline"
+    );
+
+    if (object.ContentLength) {
+      res.setHeader(
+        "Content-Length",
+        object.ContentLength
+      );
+    }
+
+    const body = object.Body as NodeJS.ReadableStream;
+    body.pipe(res);
+  } catch (error) {
+    console.error("streamRecording error:", error);
+
+    if (!res.headersSent) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to stream recording",
+      });
+    }
+  }
+};
+
+export const playRecording = async (
+  req: Request,
+  res: Response
+) => {
+  const wantsStream =
+    req.query.stream === "1" ||
+    req.query.stream === "true" ||
+    req.query.mode === "stream";
+
+  if (wantsStream) {
+    return streamRecording(req, res);
+  }
+
+  try {
+    const result = await getCallLogRecording(
+      String(req.params.callLogId)
+    );
+
+    if (result.error) {
+      return res.status(result.error.status).json({
+        success: false,
+        message: result.error.message,
+      });
+    }
+
+    const playbackUrl = await buildPlaybackUrl(
+      result.recordingUrl!
+    );
+
+    if (!playbackUrl) {
+      return res.status(400).json({
+        success: false,
+        message: "Unable to resolve recording URL",
+      });
+    }
+
+    return res.json({
+      success: true,
+      url: playbackUrl,
+    });
   } catch (error) {
     console.error("playRecording error:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to generate URL",
+      message: "Failed to generate playback URL",
     });
   }
 };

@@ -667,9 +667,12 @@ export const updateLead = async (
         ? status
         : lead.status;
 
-    if (
-      requiresScheduleDate(nextStatus)
-    ) {
+    const movingToScheduleStatus =
+      status !== undefined &&
+      status !== oldStatus &&
+      requiresScheduleDate(status);
+
+    if (movingToScheduleStatus) {
       const nextScheduledDate =
         scheduledDate !== undefined
           ? scheduledDate

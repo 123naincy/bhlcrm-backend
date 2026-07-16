@@ -6,32 +6,35 @@ import {
   getLeadCallLogs,
 } from "../controllers/activity/callLogController";
 
-import { playRecording } from "../controllers/activity/playRecording";
+import {
+  playRecording,
+  streamRecording,
+} from "../controllers/activity/playRecording";
 
 import { protect } from "../middleware/auth/authMiddleware";
 
 const router = express.Router();
 
-router.post(
-  "/",
-  protect,
-  createCallLog
-);
+router.post("/", protect, createCallLog);
+
+router.get("/my", protect, getMyCallLogs);
 
 router.get(
-  "/my",
+  "/lead/:leadId",
   protect,
-  getMyCallLogs
+  getLeadCallLogs
 );
+
 router.get(
   "/:callLogId/play",
   protect,
   playRecording
 );
+
 router.get(
-  "/lead/:leadId",
+  "/:callLogId/stream",
   protect,
-  getLeadCallLogs
+  streamRecording
 );
 
 export default router;
