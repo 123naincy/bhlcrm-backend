@@ -3,8 +3,7 @@ import mongoose, {
   Document,
 } from "mongoose";
 
-export interface ICallLog
-  extends Document {
+export interface ICallLog extends Document {
   leadId: mongoose.Types.ObjectId;
   agentId: mongoose.Types.ObjectId;
 
@@ -15,9 +14,23 @@ export interface ICallLog
     | "OUTGOING"
     | "MISSED";
 
+  callStatus:
+    | "ANSWERED"
+    | "NOT_ANSWERED"
+    | "MISSED"
+    | "REJECTED";
+
   duration: number;
 
   recordingUrl?: string;
+
+  summary?: string;
+
+  summaryStatus:
+    | "PENDING"
+    | "PROCESSING"
+    | "COMPLETED"
+    | "FAILED";
 
   callDate: Date;
 }
@@ -25,13 +38,13 @@ export interface ICallLog
 const CallLogSchema = new Schema(
   {
     leadId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: Schema.Types.ObjectId,
       ref: "Lead",
       required: true,
     },
 
     agentId: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
@@ -39,6 +52,7 @@ const CallLogSchema = new Schema(
     phone: {
       type: String,
       required: true,
+      trim: true,
     },
 
     callType: {
@@ -51,14 +65,43 @@ const CallLogSchema = new Schema(
       required: true,
     },
 
+    callStatus: {
+      type: String,
+      enum: [
+        "ANSWERED",
+        "NOT_ANSWERED",
+        "MISSED",
+        "REJECTED",
+      ],
+      default: "ANSWERED",
+    },
+
     duration: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     recordingUrl: {
       type: String,
       default: "",
+    },
+
+    summary: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
+    summaryStatus: {
+      type: String,
+      enum: [
+        "PENDING",
+        "PROCESSING",
+        "COMPLETED",
+        "FAILED",
+      ],
+      default: "PENDING",
     },
 
     callDate: {

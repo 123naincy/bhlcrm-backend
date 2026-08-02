@@ -47,7 +47,10 @@ router.get(
 router.get(
   "/my",
   protect,
-  authorizeRoles("sales_executive", "telecaller"),
+  authorizeRoles("admin",
+  "sales_manager",
+  "sales_executive",
+  "telecaller",),
   getMyLeads
 );
 router.get(

@@ -9,7 +9,12 @@ router.get("/", protect, async (req, res) => {
     const employees = await User.find(
       {
         role: {
-          $in: ["sales_executive", "sales_manager"],
+          $in: [
+            "admin",
+            "sales_manager",
+            "sales_executive",
+            "telecaller",
+          ],
         },
         isActive: true,
       },
@@ -20,18 +25,24 @@ router.get("/", protect, async (req, res) => {
         phone: 1,
         city: 1,
       }
-    ).sort({ fullName: 1 });
+    ).sort({
+      fullName: 1,
+    });
 
     res.status(200).json({
       success: true,
       employees,
     });
   } catch (error) {
-    console.error("Employee fetch error:", error);
+    console.error(
+      "Employee fetch error:",
+      error
+    );
 
     res.status(500).json({
       success: false,
-      message: "Failed to fetch employees",
+      message:
+        "Failed to fetch employees",
     });
   }
 });

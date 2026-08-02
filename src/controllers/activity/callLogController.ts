@@ -11,33 +11,40 @@ export const createCallLog = async (
   res: Response
 ) => {
   try {
+   const {
+  leadId,
+  phone,
+  callType,
+  callStatus,
+  duration,
+  recordingUrl,
+} = req.body;
 
-    console.log("REQ BODY =", JSON.stringify(req.body, null, 2));
-console.log("PLAY API HIT");
-console.log("CALL LOG ID:", req.params.callLogId);
-    const {
-      leadId,
-      phone,
-      callType,
-      duration,
-      recordingUrl,
-    } = req.body;
+    const callLog = await CallLog.create({
+  leadId,
+  phone,
+  callType,
+  callStatus:
+    callStatus ||
+    (duration > 0
+      ? "ANSWERED"
+      : "NOT_ANSWERED"),
 
-    console.log("RECORDING URL =", recordingUrl);
+  duration,
 
-    const callLog =
-      await CallLog.create({
-        leadId,
-        phone,
-        callType,
-        duration,
-        recordingUrl,
+  recordingUrl,
 
-        agentId: req.user.userId,
+  summary: "",
 
-        callDate: new Date(),
-      });
+  summaryStatus:
+    recordingUrl
+      ? "PENDING"
+      : "FAILED",
 
+  agentId: req.user.userId,
+
+  callDate: new Date(),
+});
     if (leadId) {
       await logLeadActivity({
         leadId: leadId.toString(),
