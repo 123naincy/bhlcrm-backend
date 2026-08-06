@@ -1740,155 +1740,393 @@ export const capturePublicLead =
     res.sendStatus(403);
   };
 
-  export const metaWebhookReceive =
-  async (
-    req: any,
-    res: Response
-  ) => {
-    try {
-      const entries =
-        req.body.entry || [];
+ export const metaWebhookReceive = async (
+  req: any,
+  res: Response
+) => {
+  // Meta ko jaldi response milna important hai.
+  // Filhaal debugging ke liye processing complete hone ke baad 200 bhej rahe hain.
+  try {
+    console.log("\n======================================");
+    console.log("🚀 META WEBHOOK RECEIVED");
+    console.log("Time:", new Date().toISOString());
+    console.log(
+      "Body:",
+      JSON.stringify(req.body, null, 2)
+    );
+    console.log("======================================\n");
 
-      for (const entry of entries) {
-        for (const change of entry.changes ||
-          []) {
-          const leadgenId =
-            change.value
-              ?.leadgen_id;
+    const entries = req.body?.entry || [];
 
-          const formId =
-            change.value
-              ?.form_id;
+    if (!entries.length) {
+      console.log("⚠️ No entries found in Meta webhook");
 
-          if (
-            !leadgenId ||
-            !formId
-          ) {
-            continue;
-          }
+      return res.status(200).send("EVENT_RECEIVED");
+    }
 
-          // FETCH ACTUAL LEAD
-          const response =
-            await axios.get(
-              `https://graph.facebook.com/v19.0/${leadgenId}`,
-              {
-                params: {
-                  access_token:
-                    process.env.META_ACCESS_TOKEN,
+    for (const entry of entries) {
+      console.log("📦 META ENTRY ID:", entry?.id);
+
+      const changes = entry?.changes || [];
+
+      if (!changes.length) {
+        console.log("⚠️ No changes found in entry");
+        continue;
+      }
+
+      for (const change of changes) {
+        console.log(
+          "🔔 META CHANGE:",
+          JSON.stringify(change, null, 2)
+        );
+
+        const leadgenId =
+          change?.value?.leadgen_id;
+
+        const formId =
+          change?.value?.form_id;
+
+        const pageId =
+          change?.value?.page_id;
+
+        console.log("Leadgen ID:", leadgenId);
+        console.log("Form ID:", formId);
+        console.log("Page ID:", pageId);
+
+        // ----------------------------------------
+        // VALIDATE WEBHOOK DATA
+        // ----------------------------------------
+
+        if (!leadgenId) {
+          console.log(
+            "⚠️ leadgen_id missing - skipping event"
+          );
+          continue;
+        }
+
+        if (!formId) {
+          console.log(
+            "⚠️ form_id missing - skipping event"
+          );
+          continue;
+        }
+
+        // ----------------------------------------
+        // CHECK META ACCESS TOKEN
+        // ----------------------------------------
+
+        if (!process.env.META_ACCESS_TOKEN) {
+          console.error(
+            "❌ META_ACCESS_TOKEN missing in environment"
+          );
+          continue;
+        }
+
+        // ----------------------------------------
+        // FETCH ACTUAL LEAD FROM META
+        // ----------------------------------------
+
+        let metaLead: any;
+
+        try {
+          console.log(
+            `📡 Fetching Meta lead: ${leadgenId}`
+          );
+
+          const response = await axios.get(
+            `https://graph.facebook.com/v26.0/${leadgenId}`,
+            {
+              params: {
+                access_token:
+                  process.env.META_ACCESS_TOKEN,
+              },
+            }
+          );
+
+          metaLead = response.data;
+
+          console.log(
+            "✅ META LEAD FETCH SUCCESS"
+          );
+
+          console.log(
+            "Meta lead:",
+            JSON.stringify(metaLead, null, 2)
+          );
+        } catch (error: any) {
+          console.error(
+            "❌ META GRAPH API ERROR"
+          );
+
+          console.error(
+            JSON.stringify(
+              error?.response?.data ||
+                {
+                  message: error?.message,
                 },
-              }
+              null,
+              2
+            )
+          );
+
+          continue;
+        }
+
+        // ----------------------------------------
+        // READ META FORM FIELDS
+        // ----------------------------------------
+
+        const fieldData =
+          metaLead?.field_data || [];
+
+        console.log(
+          "📝 FIELD DATA:",
+          JSON.stringify(fieldData, null, 2)
+        );
+
+        const getField = (
+          ...names: string[]
+        ) => {
+          const field =
+            fieldData.find((f: any) =>
+              names.includes(f?.name)
             );
 
-          const fieldData =
-            response.data
-              ?.field_data || [];
+          return (
+            field?.values?.[0] || ""
+          );
+        };
 
-          const getField = (
-            name: string
-          ) => {
-            const field =
-              fieldData.find(
-                (
-                  f: any
-                ) =>
-                  f.name ===
-                  name
-              );
+        /*
+         * Meta form field names can differ
+         * depending on how the Instant Form
+         * questions were configured.
+         */
+        const fullName = getField(
+          "full_name",
+          "name"
+        );
 
-            return field?.values?.[0] || "";
-          };
+        const phone = getField(
+          "phone_number",
+          "phone"
+        );
 
-          const fullName =
-            getField(
-              "full_name"
-            );
+        const email = getField(
+          "email"
+        );
 
-          const phone =
-            getField(
-              "phone_number"
-            );
+        const city = getField(
+          "city"
+        );
 
-          const email =
-            getField(
-              "email"
-            );
+        console.log(
+          "👤 PARSED CUSTOMER DATA:",
+          {
+            fullName,
+            phone: phone
+              ? "***" + String(phone).slice(-4)
+              : "",
+            email: email
+              ? "[received]"
+              : "",
+            city,
+          }
+        );
 
-          const city =
-            getField(
-              "city"
-            );
+        // ----------------------------------------
+        // PHONE VALIDATION
+        // ----------------------------------------
 
-          // FIND SOURCE MAPPING
-          const detectedProject =
+        const normalizedPhone =
+          String(phone || "").trim();
+
+        if (!normalizedPhone) {
+          console.error(
+            "❌ Phone number missing from Meta lead"
+          );
+
+          console.log(
+            "Available Meta fields:",
+            fieldData.map(
+              (field: any) =>
+                field?.name
+            )
+          );
+
+          continue;
+        }
+
+        // ----------------------------------------
+        // FIND PROJECT FROM SOURCE MAPPING
+        // ----------------------------------------
+
+        let detectedProject: any = null;
+
+        try {
+          detectedProject =
             await detectProjectFromSource(
               "meta_form",
-              formId,
-              change.value
-                ?.page_id
+              String(formId),
+              pageId
             );
 
-          // DUPLICATE CHECK
+          console.log(
+            "🏢 PROJECT DETECTED:",
+            detectedProject
+              ? {
+                  projectId:
+                    detectedProject.projectId,
+                  projectName:
+                    detectedProject.projectName,
+                }
+              : "NO PROJECT MAPPING FOUND"
+          );
+        } catch (error: any) {
+          console.error(
+            "❌ PROJECT MAPPING ERROR:",
+            error?.message || error
+          );
+        }
+
+        // ----------------------------------------
+        // DUPLICATE CHECK
+        // ----------------------------------------
+
+        try {
           const existing =
             await Lead.findOne({
-              phone:
-                String(
-                  phone
-                ).trim(),
+              phone: normalizedPhone,
             });
 
           if (existing) {
+            console.log(
+              "⚠️ DUPLICATE LEAD - SKIPPING"
+            );
+
+            console.log(
+              "Existing Lead ID:",
+              existing._id
+            );
+
             continue;
           }
+        } catch (error: any) {
+          console.error(
+            "❌ DUPLICATE CHECK ERROR:",
+            error?.message || error
+          );
 
-          await Lead.create({
-            fullName,
-            phone:
-              String(
-                phone
-              ).trim(),
-            email,
-            city:
-              city ||
-              "Unknown",
+          continue;
+        }
 
-            source:
-              "facebook_ads",
+        // ----------------------------------------
+        // CREATE CRM LEAD
+        // ----------------------------------------
 
-            sourceType:
-              "meta_form",
+        try {
+          const lead =
+            await Lead.create({
+              fullName:
+                fullName ||
+                "Meta Lead",
 
-            identifier:
-              formId,
+              phone:
+                normalizedPhone,
 
-            projectId:
-              detectedProject?.projectId,
+              email:
+                email || "",
 
-            projectName:
-              detectedProject?.projectName ||
-              "",
+              city:
+                city ||
+                "Unknown",
 
-            status: "new",
-            temperature:
-              "hot",
+              source:
+                "facebook_ads",
 
-            brandId:
-              change.value
-                ?.page_id,
-          });
+              sourceType:
+                "meta_form",
+
+              identifier:
+                String(formId),
+
+              projectId:
+                detectedProject
+                  ?.projectId,
+
+              projectName:
+                detectedProject
+                  ?.projectName ||
+                "",
+
+              status:
+                "new",
+
+              temperature:
+                "hot",
+
+              brandId:
+                pageId
+                  ? String(pageId)
+                  : "",
+            });
+
+          console.log(
+            "🎉 META LEAD CREATED SUCCESSFULLY"
+          );
+
+          console.log(
+            "CRM Lead ID:",
+            lead._id
+          );
+
+          console.log(
+            "Project:",
+            lead.projectName
+          );
+        } catch (error: any) {
+          console.error(
+            "❌ CRM LEAD CREATE ERROR"
+          );
+
+          console.error(
+            error?.errors ||
+              error?.message ||
+              error
+          );
+
+          continue;
         }
       }
-
-      res.status(200).send(
-        "EVENT_RECEIVED"
-      );
-    } catch (error) {
-      console.error(error);
-
-      res.status(500).send(
-        "Webhook error"
-      );
     }
-  };
+
+    console.log(
+      "✅ META WEBHOOK PROCESSING FINISHED"
+    );
+
+    return res
+      .status(200)
+      .send("EVENT_RECEIVED");
+  } catch (error: any) {
+    console.error(
+      "❌ META WEBHOOK FATAL ERROR"
+    );
+
+    console.error(
+      error?.response?.data ||
+        error?.message ||
+        error
+    );
+
+    /*
+     * During debugging keeping 500 is useful
+     * because delivery failure remains visible.
+     */
+    return res
+      .status(500)
+      .send("Webhook error");
+  }
+};
   export const bulkAssignLeads =
   async (
     req: any,
