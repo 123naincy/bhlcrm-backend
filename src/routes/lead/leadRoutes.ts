@@ -95,10 +95,10 @@ router.delete(
   authorizeRoles("super_admin"),
   deleteLead
 );
-router.get("/:id", protect, getLeadById);
-router.get("/", protect, getLeads);
 router.post(
   "/website",
   createWebsiteLead
 );
+router.get("/:id", protect, getLeadById);
+router.get("/", protect, getLeads);
 export default router;

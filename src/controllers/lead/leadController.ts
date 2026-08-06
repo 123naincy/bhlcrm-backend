@@ -2127,6 +2127,34 @@ export const capturePublicLead =
       .send("Webhook error");
   }
 };
+
+export async function fetchMetaLead(leadgenId) {
+  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  const version = process.env.META_GRAPH_API_VERSION || "v26.0";
+ 
+  if (!token) {
+    throw new Error("META_PAGE_ACCESS_TOKEN is missing");
+  }
+ 
+  if (!leadgenId) {
+    throw new Error("leadgenId is missing");
+  }
+ 
+  console.log("Fetching real Meta lead:", leadgenId);
+ 
+  const response = await axios.get(
+    `https://graph.facebook.com/${version}/${leadgenId}`,
+    {
+      params: {
+        fields: "id,created_time,field_data,form_id",
+        access_token: token,
+      },
+      timeout: 15000,
+    }
+  );
+ 
+  return response.data;
+}
   export const bulkAssignLeads =
   async (
     req: any,
