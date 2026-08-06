@@ -278,6 +278,8 @@ async function countTodayStatusUpdates() {
     await User.find({
       role: {
         $in: [
+          "admin",
+          "sales_manager",
           "sales_executive",
           "telecaller",
         ],
