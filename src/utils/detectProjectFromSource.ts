@@ -33,3 +33,38 @@ export const detectProjectFromSource =
         mapping.projectName,
     };
   };
+
+  export const detectMetaLeadMapping = async (
+  formId: string
+) => {
+  if (!formId) {
+    return null;
+  }
+
+  const mappings = await LeadSourceMapping.find({
+    sourceType: "meta_form",
+    identifier: formId,
+    status: "active",
+  })
+    .limit(2)
+    .lean();
+
+  if (mappings.length !== 1) {
+    console.error(
+      "Invalid or ambiguous Meta Form mapping:",
+      formId,
+      "Matches:",
+      mappings.length
+    );
+
+    return null;
+  }
+
+  const mapping = mappings[0];
+
+  return {
+    brandId: mapping.brandId,
+    projectId: mapping.projectId,
+    projectName: mapping.projectName,
+  };
+};

@@ -245,7 +245,9 @@ async function getTopFollowUpPerformer(
       (row) =>
         row.role ===
           "sales_executive" ||
-        row.role === "telecaller"
+        row.role === "telecaller"||
+        row.role === "admin"||
+        row.role === "sales_manager"
     );
 
   if (fromPerformance) {
@@ -311,6 +313,8 @@ async function countPendingAssignedLeads() {
     await User.find({
       role: {
         $in: [
+          "admin",
+          "sales_manager",
           "sales_executive",
           "telecaller",
         ],

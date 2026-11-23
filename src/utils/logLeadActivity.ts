@@ -10,7 +10,8 @@ interface LogActivityParams {
     | "temperature_updated"
     | "followup_updated"
     | "notes_updated"
-    | "schedule_updated";
+    | "schedule_updated"
+    | "call_recording";
   oldValue?: string;
   newValue?: string;
   note?: string;

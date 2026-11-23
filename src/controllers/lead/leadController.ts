@@ -10,12 +10,17 @@ import { createNotification } from "../../utils/notificationHelper";
 import ExcelJS from "exceljs";
 import XLSX from "xlsx";
 import axios from "axios";
-import { detectProjectFromSource } from "../../utils/detectProjectFromSource";
+import {
+  detectProjectFromSource,
+  detectMetaLeadMapping,
+} from "../../utils/detectProjectFromSource";
 import { extractProjectName } from "../../utils/leadProjectUtils";
 import {
   getScheduledDate,
   requiresScheduleDate,
 } from "../../utils/leadScheduleUtils";
+import crypto from "crypto";
+
 
 const populateLeadQuery = (query: any) =>
   query
@@ -1593,557 +1598,79 @@ const leads =
   }
 };
 
-export const capturePublicLead =
-  async (
-    req: any,
-    res: Response
-  ) => {
-    try {
-      const {
-        fullName,
-        phone,
-        email,
-        city,
-        source,
-        sourceType,
-        identifier,
-        brandId,
-      } = req.body;
-
-      if (
-        !fullName ||
-        !phone ||
-        !brandId
-      ) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Required fields missing",
-        });
-      }
-
-      let detectedProject =
-        null;
-
-      if (
-        sourceType &&
-        identifier
-      ) {
-        detectedProject =
-          await detectProjectFromSource(
-            sourceType,
-            identifier,
-            brandId
-          );
-      }
-
-      const existing =
-        await Lead.findOne({
-          phone: String(
-            phone
-          ).trim(),
-        });
-
-      if (existing) {
-        return res.status(200).json({
-          success: true,
-          message:
-            "Duplicate lead ignored",
-        });
-      }
-
-      const lead =
-        await Lead.create({
-          fullName,
-          phone:
-            String(
-              phone
-            ).trim(),
-          email:
-            email || "",
-          city:
-            city || "Unknown",
-
-          source:
-            source ||
-            "website",
-
-          sourceType:
-            sourceType || "",
-
-          identifier:
-            identifier || "",
-
-          projectId:
-            detectedProject?.projectId,
-
-          projectName:
-            detectedProject?.projectName ||
-            "",
-
-          status: "new",
-          temperature:
-            "cold",
-
-          brandId,
-        });
-
-      res.status(201).json({
-        success: true,
-        lead,
-      });
-    } catch (error) {
-      console.error(error);
-
-      res.status(500).json({
-        success: false,
-        message:
-          "Lead capture failed",
-      });
-    }
-  };
-
-  export const metaWebhookVerify =
-  async (
-    req: Request,
-    res: Response
-  ) => {
-    const VERIFY_TOKEN =
-      "my_meta_verify_token";
-
-    const mode =
-      req.query[
-        "hub.mode"
-      ];
-
-    const token =
-      req.query[
-        "hub.verify_token"
-      ];
-
-    const challenge =
-      req.query[
-        "hub.challenge"
-      ];
-
-    if (
-      mode ===
-        "subscribe" &&
-      token ===
-        VERIFY_TOKEN
-    ) {
-      return res
-        .status(200)
-        .send(challenge);
-    }
-
-    res.sendStatus(403);
-  };
-
- export const metaWebhookReceive = async (
-  req: any,
-  res: Response
-) => {
-  // Meta ko jaldi response milna important hai.
-  // Filhaal debugging ke liye processing complete hone ke baad 200 bhej rahe hain.
+export const capturePublicLead = async (req: any, res: Response) => {
   try {
-    console.log("\n======================================");
-    console.log("🚀 META WEBHOOK RECEIVED");
-    console.log("Time:", new Date().toISOString());
-    console.log(
-      "Body:",
-      JSON.stringify(req.body, null, 2)
-    );
-    console.log("======================================\n");
-
-    const entries = req.body?.entry || [];
-
-    if (!entries.length) {
-      console.log("⚠️ No entries found in Meta webhook");
-
-      return res.status(200).send("EVENT_RECEIVED");
+    const { fullName, phone, email, city, source, sourceType, identifier, brandId } = req.body;
+    if (!fullName || !phone || !brandId) {
+      return res.status(400).json({ success: false, message: "Required fields missing" });
     }
 
-    for (const entry of entries) {
-      console.log("📦 META ENTRY ID:", entry?.id);
-
-      const changes = entry?.changes || [];
-
-      if (!changes.length) {
-        console.log("⚠️ No changes found in entry");
-        continue;
-      }
-
-      for (const change of changes) {
-        console.log(
-          "🔔 META CHANGE:",
-          JSON.stringify(change, null, 2)
-        );
-
-        const leadgenId =
-          change?.value?.leadgen_id;
-
-        const formId =
-          change?.value?.form_id;
-
-        const pageId =
-          change?.value?.page_id;
-
-        console.log("Leadgen ID:", leadgenId);
-        console.log("Form ID:", formId);
-        console.log("Page ID:", pageId);
-
-        // ----------------------------------------
-        // VALIDATE WEBHOOK DATA
-        // ----------------------------------------
-
-        if (!leadgenId) {
-          console.log(
-            "⚠️ leadgen_id missing - skipping event"
-          );
-          continue;
-        }
-
-        if (!formId) {
-          console.log(
-            "⚠️ form_id missing - skipping event"
-          );
-          continue;
-        }
-
-        // ----------------------------------------
-        // CHECK META ACCESS TOKEN
-        // ----------------------------------------
-
-        if (!process.env.META_ACCESS_TOKEN) {
-          console.error(
-            "❌ META_ACCESS_TOKEN missing in environment"
-          );
-          continue;
-        }
-
-        // ----------------------------------------
-        // FETCH ACTUAL LEAD FROM META
-        // ----------------------------------------
-
-        let metaLead: any;
-
-        try {
-          console.log(
-            `📡 Fetching Meta lead: ${leadgenId}`
-          );
-
-          const response = await axios.get(
-            `https://graph.facebook.com/v26.0/${leadgenId}`,
-            {
-              params: {
-                access_token:
-                  process.env.META_ACCESS_TOKEN,
-              },
-            }
-          );
-
-          metaLead = response.data;
-
-          console.log(
-            "✅ META LEAD FETCH SUCCESS"
-          );
-
-          console.log(
-            "Meta lead:",
-            JSON.stringify(metaLead, null, 2)
-          );
-        } catch (error: any) {
-          console.error(
-            "❌ META GRAPH API ERROR"
-          );
-
-          console.error(
-            JSON.stringify(
-              error?.response?.data ||
-                {
-                  message: error?.message,
-                },
-              null,
-              2
-            )
-          );
-
-          continue;
-        }
-
-        // ----------------------------------------
-        // READ META FORM FIELDS
-        // ----------------------------------------
-
-        const fieldData =
-          metaLead?.field_data || [];
-
-        console.log(
-          "📝 FIELD DATA:",
-          JSON.stringify(fieldData, null, 2)
-        );
-
-        const getField = (
-          ...names: string[]
-        ) => {
-          const field =
-            fieldData.find((f: any) =>
-              names.includes(f?.name)
-            );
-
-          return (
-            field?.values?.[0] || ""
-          );
-        };
-
-        /*
-         * Meta form field names can differ
-         * depending on how the Instant Form
-         * questions were configured.
-         */
-        const fullName = getField(
-          "full_name",
-          "name"
-        );
-
-        const phone = getField(
-          "phone_number",
-          "phone"
-        );
-
-        const email = getField(
-          "email"
-        );
-
-        const city = getField(
-          "city"
-        );
-
-        console.log(
-          "👤 PARSED CUSTOMER DATA:",
-          {
-            fullName,
-            phone: phone
-              ? "***" + String(phone).slice(-4)
-              : "",
-            email: email
-              ? "[received]"
-              : "",
-            city,
-          }
-        );
-
-        // ----------------------------------------
-        // PHONE VALIDATION
-        // ----------------------------------------
-
-        const normalizedPhone =
-          String(phone || "").trim();
-
-        if (!normalizedPhone) {
-          console.error(
-            "❌ Phone number missing from Meta lead"
-          );
-
-          console.log(
-            "Available Meta fields:",
-            fieldData.map(
-              (field: any) =>
-                field?.name
-            )
-          );
-
-          continue;
-        }
-
-        // ----------------------------------------
-        // FIND PROJECT FROM SOURCE MAPPING
-        // ----------------------------------------
-
-        let detectedProject: any = null;
-
-        try {
-          detectedProject =
-            await detectProjectFromSource(
-              "meta_form",
-              String(formId),
-              pageId
-            );
-
-          console.log(
-            "🏢 PROJECT DETECTED:",
-            detectedProject
-              ? {
-                  projectId:
-                    detectedProject.projectId,
-                  projectName:
-                    detectedProject.projectName,
-                }
-              : "NO PROJECT MAPPING FOUND"
-          );
-        } catch (error: any) {
-          console.error(
-            "❌ PROJECT MAPPING ERROR:",
-            error?.message || error
-          );
-        }
-
-        // ----------------------------------------
-        // DUPLICATE CHECK
-        // ----------------------------------------
-
-        try {
-          const existing =
-            await Lead.findOne({
-              phone: normalizedPhone,
-            });
-
-          if (existing) {
-            console.log(
-              "⚠️ DUPLICATE LEAD - SKIPPING"
-            );
-
-            console.log(
-              "Existing Lead ID:",
-              existing._id
-            );
-
-            continue;
-          }
-        } catch (error: any) {
-          console.error(
-            "❌ DUPLICATE CHECK ERROR:",
-            error?.message || error
-          );
-
-          continue;
-        }
-
-        // ----------------------------------------
-        // CREATE CRM LEAD
-        // ----------------------------------------
-
-        try {
-          const lead =
-            await Lead.create({
-              fullName:
-                fullName ||
-                "Meta Lead",
-
-              phone:
-                normalizedPhone,
-
-              email:
-                email || "",
-
-              city:
-                city ||
-                "Unknown",
-
-              source:
-                "facebook_ads",
-
-              sourceType:
-                "meta_form",
-
-              identifier:
-                String(formId),
-
-              projectId:
-                detectedProject
-                  ?.projectId,
-
-              projectName:
-                detectedProject
-                  ?.projectName ||
-                "",
-
-              status:
-                "new",
-
-              temperature:
-                "hot",
-
-              brandId:
-                pageId
-                  ? String(pageId)
-                  : "",
-            });
-
-          console.log(
-            "🎉 META LEAD CREATED SUCCESSFULLY"
-          );
-
-          console.log(
-            "CRM Lead ID:",
-            lead._id
-          );
-
-          console.log(
-            "Project:",
-            lead.projectName
-          );
-        } catch (error: any) {
-          console.error(
-            "❌ CRM LEAD CREATE ERROR"
-          );
-
-          console.error(
-            error?.errors ||
-              error?.message ||
-              error
-          );
-
-          continue;
-        }
-      }
+    let detectedProject = null;
+    if (sourceType && identifier) {
+      detectedProject = await detectProjectFromSource(sourceType, identifier, brandId);
     }
 
-    console.log(
-      "✅ META WEBHOOK PROCESSING FINISHED"
-    );
+    const normalizedPhone = String(phone).trim();
+    const existing = await Lead.findOne({ phone: normalizedPhone });
+    if (existing) {
+      return res.status(200).json({ success: true, message: "Duplicate lead ignored" });
+    }
 
-    return res
-      .status(200)
-      .send("EVENT_RECEIVED");
-  } catch (error: any) {
-    console.error(
-      "❌ META WEBHOOK FATAL ERROR"
-    );
-
-    console.error(
-      error?.response?.data ||
-        error?.message ||
-        error
-    );
-
-    /*
-     * During debugging keeping 500 is useful
-     * because delivery failure remains visible.
-     */
-    return res
-      .status(500)
-      .send("Webhook error");
+    const lead = await Lead.create({
+      fullName,
+      phone: normalizedPhone,
+      email: email || "",
+      city: city || "Unknown",
+      source: source || "website",
+      sourceType: sourceType || "",
+      identifier: identifier || "",
+      projectId: detectedProject?.projectId,
+      projectName: detectedProject?.projectName || "",
+      status: "new",
+      temperature: "cold",
+      brandId,
+    });
+    return res.status(201).json({ success: true, lead });
+  } catch (error) {
+    console.error("Public lead capture failed:", error);
+    return res.status(500).json({ success: false, message: "Lead capture failed" });
   }
 };
 
-export async function fetchMetaLead(leadgenId) {
+export const metaWebhookVerify = (req: Request, res: Response) => {
+  const token = process.env.META_VERIFY_TOKEN;
+  if (
+    token &&
+    req.query["hub.mode"] === "subscribe" &&
+    req.query["hub.verify_token"] === token &&
+    typeof req.query["hub.challenge"] === "string"
+  ) {
+    return res.status(200).send(req.query["hub.challenge"]);
+  }
+  return res.sendStatus(403);
+};
+
+const verifyMetaWebhookSignature = (req: Request): boolean => {
+  const secret = process.env.META_APP_SECRET;
+  const signature = req.header("x-hub-signature-256");
+  const rawBody = (req as Request & { rawBody?: Buffer }).rawBody;
+  if (!secret || !signature || !Buffer.isBuffer(rawBody)) return false;
+  if (!/^sha256=[0-9a-f]{64}$/i.test(signature)) return false;
+
+  const expected = `sha256=${crypto.createHmac("sha256", secret).update(rawBody).digest("hex")}`;
+  const actualBuffer = Buffer.from(signature.toLowerCase(), "utf8");
+  const expectedBuffer = Buffer.from(expected, "utf8");
+  return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+};
+
+export async function fetchMetaLead(leadgenId: string) {
   const token = process.env.META_PAGE_ACCESS_TOKEN;
-  const version = process.env.META_GRAPH_API_VERSION || "v26.0";
- 
-  if (!token) {
-    throw new Error("META_PAGE_ACCESS_TOKEN is missing");
-  }
- 
-  if (!leadgenId) {
-    throw new Error("leadgenId is missing");
-  }
- 
-  console.log("Fetching real Meta lead:", leadgenId);
- 
+  const version = process.env.META_GRAPH_API_VERSION || "v27.0";
+  if (!token) throw new Error("META_PAGE_ACCESS_TOKEN is missing");
+  if (!leadgenId) throw new Error("leadgenId is missing");
+
   const response = await axios.get(
-    `https://graph.facebook.com/${version}/${leadgenId}`,
+    `https://graph.facebook.com/${version}/${encodeURIComponent(leadgenId)}`,
     {
       params: {
         fields: "id,created_time,field_data,form_id",
@@ -2152,9 +1679,103 @@ export async function fetchMetaLead(leadgenId) {
       timeout: 15000,
     }
   );
- 
   return response.data;
 }
+
+export const metaWebhookReceive = async (req: Request, res: Response) => {
+  if (!verifyMetaWebhookSignature(req)) {
+    console.error("META WEBHOOK: invalid signature or raw body not configured");
+    return res.sendStatus(403);
+  }
+
+  if (req.body?.object !== "page") {
+    return res.status(200).send("EVENT_RECEIVED");
+  }
+
+  const configuredPageId = process.env.META_PAGE_ID;
+  if (!configuredPageId || !process.env.META_PAGE_ACCESS_TOKEN) {
+    console.error("META WEBHOOK: META_PAGE_ID or META_PAGE_ACCESS_TOKEN missing");
+    return res.sendStatus(503);
+  }
+
+  try {
+    const entries = Array.isArray(req.body?.entry) ? req.body.entry : [];
+    for (const entry of entries) {
+      if (String(entry?.id || "") !== configuredPageId) {
+        console.warn("META WEBHOOK: unexpected Page ID");
+        continue;
+      }
+
+      const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+      for (const change of changes) {
+        if (change?.field !== "leadgen") continue;
+
+        const leadgenId = String(change?.value?.leadgen_id || "");
+        const formId = String(change?.value?.form_id || "");
+        const pageId = String(change?.value?.page_id || entry.id);
+        if (!leadgenId || !formId || pageId !== configuredPageId) {
+          console.warn("META WEBHOOK: invalid leadgen event");
+          continue;
+        }
+
+        // Form mapping must exist BEFORE creating a lead.
+        const mapping = await detectMetaLeadMapping(formId);
+        if (!mapping?.brandId || !mapping?.projectId) {
+          throw new Error(`Missing or ambiguous active Meta Form mapping for ${formId}`);
+        }
+
+        const metaLead = await fetchMetaLead(leadgenId);
+        if (metaLead?.form_id && String(metaLead.form_id) !== formId) {
+          throw new Error(`Meta Form ID mismatch for lead ${leadgenId}`);
+        }
+
+        const fieldData: any[] = Array.isArray(metaLead?.field_data) ? metaLead.field_data : [];
+        const getField = (...names: string[]) => {
+          const field = fieldData.find((f: any) => names.includes(String(f?.name || "")));
+          return String(field?.values?.[0] || "").trim();
+        };
+
+        const fullName = getField("full_name", "name") ||
+          [getField("first_name"), getField("last_name")].filter(Boolean).join(" ") ||
+          "Meta Lead";
+        const normalizedPhone = getField("phone_number", "phone");
+        const email = getField("email");
+        const city = getField("city");
+        if (!normalizedPhone) {
+          throw new Error(`Phone missing for Meta lead ${leadgenId}`);
+        }
+
+        // Preserve your existing CRM's phone-based duplicate rule.
+        // For true Meta event idempotency, add a unique metaLeadId field to Lead schema later.
+        const existing = await Lead.findOne({ phone: normalizedPhone });
+        if (existing) {
+          console.log("META WEBHOOK: phone already exists; lead skipped");
+          continue;
+        }
+
+        const lead = await Lead.create({
+          fullName,
+          phone: normalizedPhone,
+          email,
+          city: city || "Unknown",
+          source: "facebook_ads",
+          sourceType: "meta_form",
+          identifier: formId,
+          projectId: mapping.projectId,
+          projectName: mapping.projectName,
+          brandId: mapping.brandId,
+          status: "new",
+          temperature: "hot",
+        });
+        console.log("META WEBHOOK: lead created", String(lead._id));
+      }
+    }
+    return res.status(200).send("EVENT_RECEIVED");
+  } catch (error: any) {
+    console.error("META WEBHOOK processing failed:", error?.response?.data || error?.message || error);
+    return res.status(500).send("Webhook processing failed");
+  }
+};
   export const bulkAssignLeads =
   async (
     req: any,
@@ -2690,17 +2311,42 @@ export const createWebsiteLead =
         fullName,
         phone,
         email,
+        city,
+        brandId,
+        sourceType,
+        identifier,
+        projectId,
         projectName,
-        website,
       } = req.body;
+
+      if (!fullName || !phone || !brandId) {
+        return res.status(400).json({
+          success: false,
+          message: "Required fields missing",
+        });
+      }
+
+      let detectedProject = null;
+      if (sourceType && identifier) {
+        detectedProject = await detectProjectFromSource(
+          sourceType,
+          identifier,
+          brandId
+        );
+      }
 
       const lead =
         await Lead.create({
           fullName,
           phone,
           email,
-          projectName,
+          city: city || "Unknown",
+          projectId: detectedProject?.projectId || projectId,
+          projectName: detectedProject?.projectName || projectName || "",
+          brandId,
           source: "website",
+          sourceType: sourceType || "",
+          identifier: identifier || "",
         });
 
       return res.status(201).json({
