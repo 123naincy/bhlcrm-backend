@@ -13,6 +13,7 @@ import axios from "axios";
 import {
   detectProjectFromSource,
   detectMetaLeadMapping,
+  detectWebsiteLeadMapping,
 } from "../../utils/detectProjectFromSource";
 import { extractProjectName } from "../../utils/leadProjectUtils";
 import {
@@ -81,6 +82,9 @@ export const createLead = async (
       identifier,
       projectId,
       projectName,
+      campaignName,
+      adSetName,
+      adName,
     } = req.body;
 
     if (
@@ -122,6 +126,21 @@ export const createLead = async (
         email,
         source,
         city,
+
+        campaignName:
+          typeof campaignName === "string"
+            ? campaignName.trim()
+            : "",
+
+        adSetName:
+          typeof adSetName === "string"
+            ? adSetName.trim()
+            : "",
+
+        adName:
+          typeof adName === "string"
+            ? adName.trim()
+            : "",
 
         projectId:
           detectedProject?.projectId ||
@@ -236,11 +255,11 @@ export const getLeads = async (
       assignedTo &&
       (
         user.role ===
-          "super_admin" ||
+        "super_admin" ||
         user.role ===
-          "admin" ||
+        "admin" ||
         user.role ===
-          "sales_manager"
+        "sales_manager"
       )
     ) {
       filter.assignedTo =
@@ -442,7 +461,7 @@ export const getLeads = async (
 
     if (
       dateRange ===
-        "custom" &&
+      "custom" &&
       fromDate &&
       toDate
     ) {
@@ -473,7 +492,7 @@ export const getLeads = async (
       await populateLeadQuery(
         Lead.find(filter)
       ).sort({
-          updatedAt: -1,
+        updatedAt: -1,
       });
 
     return res.status(200).json({
@@ -577,7 +596,7 @@ export const reassignLead = async (
     if (
       oldAssignedTo &&
       oldAssignedTo !==
-        employee._id.toString()
+      employee._id.toString()
     ) {
       await createNotification({
         title: "Lead Reassigned",
@@ -731,21 +750,21 @@ export const updateLead = async (
               status === "won"
                 ? "Deal Won 🎉"
                 : status === "lost"
-                ? "Lead Lost ⚠"
-                : "Lead Status Updated",
+                  ? "Lead Lost ⚠"
+                  : "Lead Status Updated",
             message:
               status === "won"
                 ? `${lead.fullName} converted successfully`
                 : status ===
                   "lost"
-                ? `${lead.fullName} marked as lost`
-                : `${lead.fullName} moved to ${status}`,
+                  ? `${lead.fullName} marked as lost`
+                  : `${lead.fullName} moved to ${status}`,
             type:
               status === "won"
                 ? "deal_won"
                 : status === "lost"
-                ? "deal_lost"
-                : "lead_status_changed",
+                  ? "deal_lost"
+                  : "lead_status_changed",
             userId:
               manager._id.toString(),
             meta: {
@@ -777,7 +796,7 @@ export const updateLead = async (
 
       if (
         temperature !==
-          oldTemperature
+        oldTemperature
       ) {
         lead.temperature =
           temperature;
@@ -1195,7 +1214,7 @@ export const getKanbanLeads = async (
     // role restriction
     if (
       user.role ===
-        "sales_executive" ||
+      "sales_executive" ||
       user.role === "telecaller"
     ) {
       query.assignedTo = user.userId;
@@ -1205,7 +1224,7 @@ export const getKanbanLeads = async (
     if (
       assignedTo &&
       user.role !==
-        "sales_executive" &&
+      "sales_executive" &&
       user.role !== "telecaller"
     ) {
       query.assignedTo = assignedTo;
@@ -1285,19 +1304,45 @@ export const exportLeads = async (
   res: Response
 ) => {
   try {
-    const {
-      source,
-      city,
-      assignedTo,
-      temperature,
-    } = req.query;
+    const user = req.user;
+    const allowedRoles = [
+      "super_admin",
+      "admin",
+      "sales_manager",
+    ];
+
+    if (!user || !allowedRoles.includes(user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    const mode = req.query.mode ?? "all";
+
+    if (!["all", "assigned", "my"].includes(mode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid lead mode",
+      });
+    }
 
     const filter: any = buildLeadFilter(req);
 
-    if (source) filter.source = source;
-    if (city) filter.city = city;
-    if (assignedTo) filter.assignedTo = assignedTo;
-    if (temperature) filter.temperature = temperature;
+    if (mode === "assigned" && !filter.assignedTo) {
+      filter.assignedTo = { $ne: null };
+    }
+
+    if (mode === "my") {
+      if (!user.userId) {
+        return res.status(403).json({
+          success: false,
+          message: "Invalid user",
+        });
+      }
+
+      filter.assignedTo = user.userId;
+    }
 
     const leads = await Lead.find(filter)
       .populate(
@@ -1334,9 +1379,29 @@ export const exportLeads = async (
         width: 18,
       },
       {
+        header: "Project Name",
+        key: "projectName",
+        width: 30,
+      },
+      {
         header: "Source",
         key: "source",
         width: 18,
+      },
+      {
+        header: "Campaign Name",
+        key: "campaignName",
+        width: 35,
+      },
+      {
+        header: "Ad Set Name",
+        key: "adSetName",
+        width: 35,
+      },
+      {
+        header: "Ad Name",
+        key: "adName",
+        width: 35,
       },
       {
         header: "Budget",
@@ -1366,12 +1431,16 @@ export const exportLeads = async (
     ];
 
     leads.forEach((lead: any) => {
+      projectName: extractProjectName(lead) || "",
       worksheet.addRow({
         fullName: lead.fullName || "",
         phone: lead.phone || "",
         email: lead.email || "",
         city: lead.city || "",
         source: lead.source || "",
+        campaignName: lead.campaignName || "",
+        adSetName: lead.adSetName || "",
+        adName: lead.adName || "",
         budget: lead.budget || "",
         status: lead.status || "",
         temperature:
@@ -1435,7 +1504,7 @@ export const importLeads = async (
 
     const worksheet =
       workbook.Sheets[
-        workbook.SheetNames[0]
+      workbook.SheetNames[0]
       ];
 
     const rows: any[] =
@@ -1445,31 +1514,52 @@ export const importLeads = async (
 
     const imported: any[] = [];
 
-   for (let i = 0; i < rows.length; i++) {
-  const row: any = rows[i];
+    for (let i = 0; i < rows.length; i++) {
+      const row: any = rows[i];
 
-  const values = Object.values(row);
+      const values = Object.values(row);
 
-  const fullName = String(values[0] || "").trim();
-  const phone = String(values[1] || "").trim();
-  const email = String(values[2] || "").trim();
+      const fullName = String(values[0] || "").trim();
+      const phone = String(values[1] || "").trim();
+      const email = String(values[2] || "").trim();
 
-  if (!fullName && !phone && !email) {
-    continue;
-  }
+      if (!fullName && !phone && !email) {
+        continue;
+      }
 
-  imported.push({
-    fullName: fullName || `Lead ${i + 1}`,
-    phone: phone || `NO_PHONE_${i}`,
-    email: email || "",
-    city: "Unknown",
-    source: "csv_import",
-    status: "new",
-    temperature: "cold",
-    brandId,
-    projectName: req.body.projectName || "",
-  });
-}
+      imported.push({
+        fullName: fullName || `Lead ${i + 1}`,
+        phone: phone || `NO_PHONE_${i}`,
+        email: email || "",
+        city: "Unknown",
+        source: "csv_import",
+        campaignName: String(
+          row["Campaign Name"] ??
+          row["campaignName"] ??
+          row["campaign_name"] ??
+          ""
+        ).trim(),
+
+        adSetName: String(
+          row["Ad Set Name"] ??
+          row["Adset Name"] ??
+          row["adSetName"] ??
+          row["adset_name"] ??
+          ""
+        ).trim(),
+
+        adName: String(
+          row["Ad Name"] ??
+          row["adName"] ??
+          row["ad_name"] ??
+          ""
+        ).trim(),
+        status: "new",
+        temperature: "cold",
+        brandId,
+        projectName: req.body.projectName || "",
+      });
+    }
 
     if (
       imported.length > 0
@@ -1507,15 +1597,15 @@ export const getAllLeads = async (
   res: Response
 ) => {
   try {
-   const filter =
-  buildLeadFilter(req);
+    const filter =
+      buildLeadFilter(req);
 
-const leads =
-  await populateLeadQuery(
-    Lead.find(filter)
-  ).sort({
-          updatedAt: -1,
-  });
+    const leads =
+      await populateLeadQuery(
+        Lead.find(filter)
+      ).sort({
+        updatedAt: -1,
+      });
 
     res.status(200).json({
       success: true,
@@ -1538,18 +1628,20 @@ export const getAssignedLeads =
   ) => {
     try {
       const filter =
-  buildLeadFilter(req);
+        buildLeadFilter(req);
 
-filter.assignedTo = {
-  $ne: null,
-};
+      if (!filter.assignedTo) {
+        filter.assignedTo = {
+          $ne: null,
+        };
+      }
 
-const leads =
-  await populateLeadQuery(
-    Lead.find(filter)
-  ).sort({
-    updatedAt: -1,
-  });
+      const leads =
+        await populateLeadQuery(
+          Lead.find(filter)
+        ).sort({
+          updatedAt: -1,
+        });
 
       res.status(200).json({
         success: true,
@@ -1564,7 +1656,7 @@ const leads =
       });
     }
   };
-  export const getMyLeads = async (
+export const getMyLeads = async (
   req: any,
   res: Response
 ) => {
@@ -1572,17 +1664,17 @@ const leads =
     const user = req.user;
 
     const filter =
-  buildLeadFilter(req);
+      buildLeadFilter(req);
 
-filter.assignedTo =
-  user.userId;
+    filter.assignedTo =
+      user.userId;
 
-const leads =
-  await populateLeadQuery(
-    Lead.find(filter)
-  ).sort({
-    updatedAt: -1,
-  });
+    const leads =
+      await populateLeadQuery(
+        Lead.find(filter)
+      ).sort({
+        updatedAt: -1,
+      });
 
     res.status(200).json({
       success: true,
@@ -1594,6 +1686,149 @@ const leads =
       message:
         "Failed to fetch my leads",
       error,
+    });
+  }
+};
+
+export const getLeadFilterOptions = async (
+  req: any,
+  res: Response
+) => {
+  try {
+    const user = req.user;
+    const mode = req.query.mode ?? "my";
+
+    const privilegedRoles = [
+      "super_admin",
+      "admin",
+      "sales_manager",
+    ];
+
+    const allowedRoles = [
+      ...privilegedRoles,
+      "sales_executive",
+      "telecaller",
+    ];
+
+    if (!user || !allowedRoles.includes(user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    if (!["all", "assigned", "my"].includes(mode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid lead mode",
+      });
+    }
+
+    const isPrivileged = privilegedRoles.includes(user.role);
+
+    if (mode !== "my" && !isPrivileged) {
+      return res.status(403).json({
+        success: false,
+        message: "Access denied",
+      });
+    }
+
+    const baseFilter: any = {};
+
+    if (mode === "my") {
+      if (!user.userId) {
+        return res.status(403).json({
+          success: false,
+          message: "Invalid user",
+        });
+      }
+
+      baseFilter.assignedTo = user.userId;
+    } else if (mode === "assigned") {
+      baseFilter.assignedTo = { $ne: null };
+    }
+
+    const clean = (value: unknown): string =>
+      typeof value === "string"
+        ? value.trim()
+        : "";
+
+    const projectName = clean(req.query.projectName);
+    const source = clean(req.query.source);
+    const campaignName = clean(req.query.campaignName);
+    const adSetName = clean(req.query.adSetName);
+
+    // Project and source-wise campaigns
+    const campaignFilter = {
+      ...baseFilter,
+      ...(projectName ? { projectName } : {}),
+      ...(source ? { source } : {}),
+    };
+
+    // Campaign-wise ad sets
+    const adSetFilter = {
+      ...campaignFilter,
+      ...(campaignName ? { campaignName } : {}),
+    };
+
+    // Ad set-wise ads
+    const adFilter = {
+      ...adSetFilter,
+      ...(adSetName ? { adSetName } : {}),
+    };
+
+    const [
+      projects,
+      sources,
+      sourceTypes,
+      campaigns,
+      adSets,
+      adNames,
+      cities,
+      propertyTypes,
+      budgets,
+      brands,
+    ] = await Promise.all([
+      Lead.distinct("projectName", baseFilter),
+      Lead.distinct("source", baseFilter),
+      Lead.distinct("sourceType", baseFilter),
+      Lead.distinct("campaignName", campaignFilter),
+      Lead.distinct("adSetName", adSetFilter),
+      Lead.distinct("adName", adFilter),
+      Lead.distinct("city", baseFilter),
+      Lead.distinct("propertyType", baseFilter),
+      Lead.distinct("budget", baseFilter),
+      Lead.distinct("brandId", baseFilter),
+    ]);
+
+    const cleanOptions = (values: unknown[]) =>
+      [...new Set(
+        values
+          .map((value) => String(value ?? ""))
+          .filter((value) => value.trim() !== "")
+      )].sort((a, b) => a.localeCompare(b));
+
+    return res.status(200).json({
+      success: true,
+      options: {
+        projects: cleanOptions(projects),
+        sources: cleanOptions(sources),
+        sourceTypes: cleanOptions(sourceTypes),
+        campaigns: cleanOptions(campaigns),
+        adSets: cleanOptions(adSets),
+        adNames: cleanOptions(adNames),
+        cities: cleanOptions(cities),
+        propertyTypes: cleanOptions(propertyTypes),
+        budgets: cleanOptions(budgets),
+        brands: cleanOptions(brands),
+      },
+    });
+  } catch (error) {
+    console.error("Filter options error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch lead filter options",
     });
   }
 };
@@ -1663,23 +1898,221 @@ const verifyMetaWebhookSignature = (req: Request): boolean => {
   return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
 };
 
-export async function fetchMetaLead(leadgenId: string) {
+export async function fetchMetaLead(
+  leadgenId: string,
+  webhookAdId = "",
+  webhookAdSetId = "",
+  webhookCampaignId = ""
+) {
   const token = process.env.META_PAGE_ACCESS_TOKEN;
-  const version = process.env.META_GRAPH_API_VERSION || "v27.0";
-  if (!token) throw new Error("META_PAGE_ACCESS_TOKEN is missing");
-  if (!leadgenId) throw new Error("leadgenId is missing");
+  const marketingToken =
+    process.env.META_MARKETING_ACCESS_TOKEN || token;
 
-  const response = await axios.get(
-    `https://graph.facebook.com/${version}/${encodeURIComponent(leadgenId)}`,
-    {
-      params: {
-        fields: "id,created_time,field_data,form_id",
-        access_token: token,
-      },
-      timeout: 15000,
-    }
+  const version =
+    process.env.META_GRAPH_API_VERSION || "v27.0";
+
+  if (!token) {
+    throw new Error("META_PAGE_ACCESS_TOKEN is missing");
+  }
+
+  if (!leadgenId) {
+    throw new Error("leadgenId is missing");
+  }
+
+  const baseUrl =
+    `https://graph.facebook.com/${version}`;
+
+  const basicFields =
+    "id,created_time,field_data,form_id";
+
+  const campaignFields =
+    "campaign_id,campaign_name,adset_id,adset_name,ad_id,ad_name";
+
+  const graphGet = async (
+    id: string,
+    fields: string,
+    accessToken: string
+  ) => {
+    const response = await axios.get(
+      `${baseUrl}/${encodeURIComponent(id)}`,
+      {
+        params: {
+          fields,
+          access_token: accessToken,
+        },
+        timeout: 10000,
+      }
+    );
+
+    return response.data;
+  };
+
+  const logMetaError = (
+    label: string,
+    error: any
+  ) => {
+    const metaError = error?.response?.data?.error;
+
+    console.warn(label, {
+      code: metaError?.code,
+      subcode: metaError?.error_subcode,
+      message: metaError?.message || "Request failed",
+    });
+  };
+
+  let metaLead: any;
+
+  // STEP 1: Fetch lead with campaign details
+  try {
+    metaLead = await graphGet(
+      leadgenId,
+      `${basicFields},${campaignFields}`,
+      token
+    );
+  } catch (error) {
+    logMetaError(
+      "META: Extended lead fetch failed",
+      error
+    );
+
+    // Preserve existing lead capture
+    metaLead = await graphGet(
+      leadgenId,
+      basicFields,
+      token
+    );
+  }
+
+  // STEP 2: Collect available attribution IDs
+  let adId = String(
+    metaLead?.ad_id || webhookAdId || ""
   );
-  return response.data;
+
+  let adSetId = String(
+    metaLead?.adset_id || webhookAdSetId || ""
+  );
+
+  let campaignId = String(
+    metaLead?.campaign_id || webhookCampaignId || ""
+  );
+
+  let adName = String(
+    metaLead?.ad_name || ""
+  ).trim();
+
+  let adSetName = String(
+    metaLead?.adset_name || ""
+  ).trim();
+
+  let campaignName = String(
+    metaLead?.campaign_name || ""
+  ).trim();
+
+  // STEP 3: Fetch attribution directly from Ad ID
+  if (
+    adId &&
+    marketingToken &&
+    (!adName ||
+      !adSetName ||
+      !campaignName ||
+      !adSetId ||
+      !campaignId)
+  ) {
+    try {
+      const ad = await graphGet(
+        adId,
+        "id,name,adset_id,campaign_id,adset{id,name},campaign{id,name}",
+        marketingToken
+      );
+
+      adName = adName || ad?.name || "";
+
+      adSetId =
+        adSetId ||
+        ad?.adset_id ||
+        ad?.adset?.id ||
+        "";
+
+      campaignId =
+        campaignId ||
+        ad?.campaign_id ||
+        ad?.campaign?.id ||
+        "";
+
+      adSetName =
+        adSetName || ad?.adset?.name || "";
+
+      campaignName =
+        campaignName || ad?.campaign?.name || "";
+
+    } catch (error) {
+      logMetaError(
+        "META: Ad details fetch failed",
+        error
+      );
+    }
+  }
+
+  // STEP 4: Fetch Ad Set name separately
+  if (adSetId && marketingToken && (!adSetName || !campaignId)) {
+    try {
+      const adSet = await graphGet(
+        adSetId,
+        "id,name,campaign_id",
+        marketingToken
+      );
+
+      adSetName = adSetName || adSet?.name || "";
+
+      campaignId =
+        campaignId || adSet?.campaign_id || "";
+
+    } catch (error) {
+      logMetaError(
+        "META: Ad Set fetch failed",
+        error
+      );
+    }
+  }
+
+  // STEP 5: Fetch Campaign name separately
+  if (campaignId && marketingToken && !campaignName) {
+    try {
+      const campaign = await graphGet(
+        campaignId,
+        "id,name",
+        marketingToken
+      );
+
+      campaignName = campaign?.name || "";
+
+    } catch (error) {
+      logMetaError(
+        "META: Campaign fetch failed",
+        error
+      );
+    }
+  }
+
+  console.log("META ATTRIBUTION:", {
+    leadgenId,
+    adId,
+    adName,
+    adSetId,
+    adSetName,
+    campaignId,
+    campaignName,
+  });
+
+  return {
+    ...metaLead,
+    ad_id: adId,
+    ad_name: adName,
+    adset_id: adSetId,
+    adset_name: adSetName,
+    campaign_id: campaignId,
+    campaign_name: campaignName,
+  };
 }
 
 export const metaWebhookReceive = async (req: Request, res: Response) => {
@@ -1724,7 +2157,32 @@ export const metaWebhookReceive = async (req: Request, res: Response) => {
           throw new Error(`Missing or ambiguous active Meta Form mapping for ${formId}`);
         }
 
-        const metaLead = await fetchMetaLead(leadgenId);
+       const webhookAdId = String(
+  change?.value?.ad_id || ""
+);
+
+const webhookAdSetId = String(
+  change?.value?.adset_id || ""
+);
+
+const webhookCampaignId = String(
+  change?.value?.campaign_id || ""
+);
+
+console.log("META WEBHOOK ATTRIBUTION:", {
+  leadgenId,
+  formId,
+  webhookAdId,
+  webhookAdSetId,
+  webhookCampaignId,
+});
+
+const metaLead = await fetchMetaLead(
+  leadgenId,
+  webhookAdId,
+  webhookAdSetId,
+  webhookCampaignId
+);
         if (metaLead?.form_id && String(metaLead.form_id) !== formId) {
           throw new Error(`Meta Form ID mismatch for lead ${leadgenId}`);
         }
@@ -1741,6 +2199,17 @@ export const metaWebhookReceive = async (req: Request, res: Response) => {
         const normalizedPhone = getField("phone_number", "phone");
         const email = getField("email");
         const city = getField("city");
+        const campaignName = String(
+          metaLead?.campaign_name || ""
+        ).trim();
+
+        const adSetName = String(
+          metaLead?.adset_name || ""
+        ).trim();
+
+        const adName = String(
+          metaLead?.ad_name || ""
+        ).trim();
         if (!normalizedPhone) {
           throw new Error(`Phone missing for Meta lead ${leadgenId}`);
         }
@@ -1758,14 +2227,28 @@ export const metaWebhookReceive = async (req: Request, res: Response) => {
           phone: normalizedPhone,
           email,
           city: city || "Unknown",
+
           source: "facebook_ads",
           sourceType: "meta_form",
           identifier: formId,
+
+          campaignName,
+          adSetName,
+          adName,
+
           projectId: mapping.projectId,
           projectName: mapping.projectName,
           brandId: mapping.brandId,
+
           status: "new",
           temperature: "hot",
+
+          extraFields: {
+            campaignId: String(metaLead?.campaign_id || ""),
+            adSetId: String(metaLead?.adset_id || ""),
+            adId: String(metaLead?.ad_id || ""),
+            metaLeadId: leadgenId,
+          },
         });
         console.log("META WEBHOOK: lead created", String(lead._id));
       }
@@ -1776,7 +2259,7 @@ export const metaWebhookReceive = async (req: Request, res: Response) => {
     return res.status(500).send("Webhook processing failed");
   }
 };
-  export const bulkAssignLeads =
+export const bulkAssignLeads =
   async (
     req: any,
     res: Response
@@ -1879,7 +2362,7 @@ export const metaWebhookReceive = async (req: Request, res: Response) => {
       });
     }
   };
-  export const getLeadById = async (
+export const getLeadById = async (
   req: any,
   res: Response
 ) => {
@@ -1903,9 +2386,9 @@ export const metaWebhookReceive = async (req: Request, res: Response) => {
     // MY LEADS security
     if (
       user.role ===
-        "sales_executive" ||
+      "sales_executive" ||
       user.role ===
-        "telecaller"
+      "telecaller"
     ) {
       if (
         String(
@@ -2089,8 +2572,8 @@ export const addLeadNote =
     }
   };
 
- // getemployeeperformance
-  export const getEmployeePerformance = async (
+// getemployeeperformance
+export const getEmployeePerformance = async (
   req: any,
   res: Response
 ) => {
@@ -2163,9 +2646,7 @@ export const addLeadNote =
     });
   }
 };
-const buildLeadFilter = (
-  req: any
-) => {
+const buildLeadFilter = (req: any) => {
   const {
     search,
     status,
@@ -2174,56 +2655,191 @@ const buildLeadFilter = (
     dateRange,
     fromDate,
     toDate,
+
+    // Project & Source Filters
+    brandId,
+    projectId,
+    projectName,
+    source,
+    sourceType,
+    identifier,
+
+    // Campaign Filters
+    campaignName,
+    adSetName,
+    adName,
+    keyword,
+
+    // Customer Filters
+    city,
+    propertyType,
+    budget,
+    isDuplicate,
   } = req.query;
 
   const filter: any = {};
   const today = new Date();
 
+  const clean = (value: unknown): string =>
+    typeof value === "string"
+      ? value.trim()
+      : "";
+
+  const escapeRegex = (value: string) =>
+    value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
   const applyRange = (start: Date, end?: Date) => {
     filter.updatedAt = end
       ? {
-          $gte: start,
-          $lte: end,
-        }
+        $gte: start,
+        $lte: end,
+      }
       : {
-          $gte: start,
-        };
+        $gte: start,
+      };
   };
 
-  if (search) {
-    filter.$or = [
-      {
-        fullName: {
-          $regex: search,
-          $options: "i",
-        },
-      },
-      {
-        phone: {
-          $regex: search,
-          $options: "i",
-        },
-      },
+  // ==============================
+  // GLOBAL SEARCH
+  // ==============================
+
+  if (clean(search)) {
+    const searchValue = escapeRegex(clean(search));
+
+    const searchFields = [
+      "fullName",
+      "phone",
+      "alternatePhone",
+      "email",
+      "projectName",
+      "campaignName",
+      "adSetName",
+      "adName",
+      "city",
     ];
+
+    filter.$or = searchFields.map((field) => ({
+      [field]: {
+        $regex: searchValue,
+        $options: "i",
+      },
+    }));
   }
 
-  if (status) {
-    filter.status = status;
+  // ==============================
+  // BRAND & PROJECT FILTERS
+  // ==============================
+
+  if (clean(brandId)) {
+    filter.brandId = clean(brandId);
   }
 
-  if (temperature) {
-    filter.temperature = temperature;
+  if (clean(projectId)) {
+    filter.projectId = clean(projectId);
   }
 
-  if (assignedTo) {
-    filter.assignedTo = assignedTo;
+  if (clean(projectName)) {
+    filter.projectName = clean(projectName);
   }
+
+  // ==============================
+  // SOURCE FILTERS
+  // ==============================
+
+  if (clean(source)) {
+    filter.source = clean(source);
+  }
+
+  if (clean(sourceType)) {
+    filter.sourceType = clean(sourceType);
+  }
+
+  if (clean(identifier)) {
+    filter.identifier = clean(identifier);
+  }
+
+  // ==============================
+  // CAMPAIGN FILTERS
+  // ==============================
+
+  if (clean(campaignName)) {
+    filter.campaignName = clean(campaignName);
+  }
+
+  if (clean(adSetName)) {
+    filter.adSetName = clean(adSetName);
+  }
+
+  if (clean(adName)) {
+    filter.adName = clean(adName);
+  }
+
+  if (clean(keyword)) {
+    filter.keyword = clean(keyword);
+  }
+
+  // ==============================
+  // STATUS & TEMPERATURE
+  // ==============================
+
+  if (clean(status)) {
+    filter.status = clean(status);
+  }
+
+  if (clean(temperature)) {
+    filter.temperature = clean(temperature);
+  }
+
+  // ==============================
+  // TEAM MEMBER FILTER
+  // ==============================
+
+  if (clean(assignedTo)) {
+    filter.assignedTo = clean(assignedTo);
+  }
+
+  // ==============================
+  // CUSTOMER FILTERS
+  // ==============================
+
+  if (clean(city)) {
+    filter.city = {
+      $regex: `^${escapeRegex(clean(city))}$`,
+      $options: "i",
+    };
+  }
+
+  if (clean(propertyType)) {
+    filter.propertyType = clean(propertyType);
+  }
+
+  if (clean(budget)) {
+    filter.budget = clean(budget);
+  }
+
+  // ==============================
+  // DUPLICATE LEADS
+  // ==============================
+
+  if (isDuplicate === "true") {
+    filter.isDuplicate = true;
+  }
+
+  if (isDuplicate === "false") {
+    filter.isDuplicate = false;
+  }
+
+  // ==============================
+  // DATE FILTERS
+  // ==============================
 
   if (dateRange === "today") {
     const start = new Date(today);
     start.setHours(0, 0, 0, 0);
+
     const end = new Date(today);
     end.setHours(23, 59, 59, 999);
+
     applyRange(start, end);
   }
 
@@ -2231,9 +2847,11 @@ const buildLeadFilter = (
     const start = new Date(today);
     start.setDate(start.getDate() - 1);
     start.setHours(0, 0, 0, 0);
+
     const end = new Date(today);
     end.setDate(end.getDate() - 1);
     end.setHours(23, 59, 59, 999);
+
     applyRange(start, end);
   }
 
@@ -2241,8 +2859,10 @@ const buildLeadFilter = (
     const start = new Date(today);
     start.setDate(start.getDate() - 6);
     start.setHours(0, 0, 0, 0);
+
     const end = new Date(today);
     end.setHours(23, 59, 59, 999);
+
     applyRange(start, end);
   }
 
@@ -2250,8 +2870,10 @@ const buildLeadFilter = (
     const start = new Date(today);
     start.setDate(start.getDate() - 29);
     start.setHours(0, 0, 0, 0);
+
     const end = new Date(today);
     end.setHours(23, 59, 59, 999);
+
     applyRange(start, end);
   }
 
@@ -2261,8 +2883,10 @@ const buildLeadFilter = (
       today.getMonth(),
       1
     );
+
     const end = new Date(today);
     end.setHours(23, 59, 59, 999);
+
     applyRange(start, end);
   }
 
@@ -2272,31 +2896,36 @@ const buildLeadFilter = (
       today.getMonth() - 1,
       1
     );
+
     const end = new Date(
       today.getFullYear(),
       today.getMonth(),
       0
     );
+
     end.setHours(23, 59, 59, 999);
+
     applyRange(start, end);
   }
 
   if (
     dateRange === "custom" &&
-    fromDate &&
-    toDate
+    clean(fromDate) &&
+    clean(toDate)
   ) {
-    const start = new Date(fromDate);
-    const end = new Date(toDate);
+    const start = new Date(clean(fromDate));
+    const end = new Date(clean(toDate));
 
-    end.setHours(
-      23,
-      59,
-      59,
-      999
-    );
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
 
-    applyRange(start, end);
+    if (
+      !Number.isNaN(start.getTime()) &&
+      !Number.isNaN(end.getTime()) &&
+      start <= end
+    ) {
+      applyRange(start, end);
+    }
   }
 
   return filter;
@@ -2403,6 +3032,185 @@ export const deleteLead = async (
     res.status(500).json({
       success: false,
       message: "Failed to delete lead",
+    });
+  }
+};
+
+export const createLandingPageLead = async (
+  req: Request,
+  res: Response
+) => {
+  try {
+    const {
+      fullName,
+      phone,
+      email,
+      identifier,
+      interest,
+      consent,
+      utm_source,
+      utm_medium,
+      utm_campaign,
+      utm_content,
+      utm_term,
+      campaign_id,
+      adset_id,
+      adset_name,
+      ad_id,
+      placement,
+      landingPage,
+    } = req.body || {};
+
+    const clean = (value: unknown, max = 200): string =>
+      typeof value === "string"
+        ? value.trim().slice(0, max)
+        : "";
+
+    const normalizedName = clean(fullName, 60);
+    const normalizedEmail = clean(email, 254).toLowerCase();
+    const normalizedIdentifier = clean(identifier, 100);
+
+    const normalizedPhone = clean(phone, 30)
+      .replace(/[\s-]/g, "")
+      .replace(/^\+91/, "")
+      .replace(/^91(?=[6-9]\d{9}$)/, "");
+
+    // 1. Required fields
+    if (
+      normalizedName.length < 2 ||
+      !normalizedPhone ||
+      !normalizedIdentifier
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Required fields missing",
+      });
+    }
+
+    // 2. Phone validation
+    if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid mobile number",
+      });
+    }
+
+    // 3. Email validation
+    if (
+      normalizedEmail &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email address",
+      });
+    }
+
+    // 4. Interest validation
+    if (!["Investment", "Self Use"].includes(interest)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid customer interest",
+      });
+    }
+
+    // 5. Consent validation
+    if (consent !== true) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer consent is required",
+      });
+    }
+
+    // 6. Automatic brand and project mapping
+    const mapping = await detectWebsiteLeadMapping(
+      normalizedIdentifier
+    );
+
+    if (!mapping?.brandId || !mapping?.projectId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid landing page configuration",
+      });
+    }
+
+    // 7. Duplicate detection within the same project
+    const existing = await Lead.findOne({
+      brandId: mapping.brandId,
+      projectId: mapping.projectId,
+      phone: {
+        $in: [
+          normalizedPhone,
+          `+91${normalizedPhone}`,
+          `91${normalizedPhone}`,
+          `+91 ${normalizedPhone}`,
+          `+91-${normalizedPhone}`,
+        ],
+      },
+    }).select("_id");
+
+    // 8. Create lead
+    const lead = await Lead.create({
+      fullName: normalizedName,
+      phone: normalizedPhone,
+      email: normalizedEmail,
+      city: "Unknown",
+
+      brandId: mapping.brandId,
+      projectId: mapping.projectId,
+      projectName: mapping.projectName,
+
+      source: "landing_page",
+      sourceType: "landing_page",
+      identifier: normalizedIdentifier,
+
+      campaignName: clean(utm_campaign),
+      adSetName: clean(adset_name),
+      adName: clean(utm_content),
+      keyword: clean(utm_term),
+
+      status: existing ? "duplicate" : "new",
+      temperature: "cold",
+      isDuplicate: Boolean(existing),
+
+      extraFields: {
+        interest: clean(interest),
+        consent: true,
+        consentAt: new Date().toISOString(),
+
+        utm_source: clean(utm_source),
+        utm_medium: clean(utm_medium),
+        utm_campaign: clean(utm_campaign),
+        utm_content: clean(utm_content),
+        campaignId: clean(campaign_id),
+        adSetId: clean(adset_id),
+        adId: clean(ad_id),
+        placement: clean(placement),
+        platform: clean(utm_source),
+
+        landingPage: clean(landingPage, 500),
+      },
+    });
+
+    console.log(
+      "WEBSITE LEAD: created",
+      String(lead._id)
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Enquiry submitted successfully",
+    });
+
+  } catch (error) {
+    console.error(
+      "WEBSITE LEAD: creation failed",
+      error instanceof Error ? error.name : "Unknown error"
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Unable to submit enquiry",
     });
   }
 };

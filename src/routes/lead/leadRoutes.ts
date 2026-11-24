@@ -23,6 +23,8 @@ import {
   getEmployeePerformance,
   createWebsiteLead,
   deleteLead,
+  createLandingPageLead,
+  getLeadFilterOptions,
 } from "../../controllers/lead/leadController";
 import { authorizeRoles } from "../../middleware/auth/roleMiddleware";
 import { protect } from "../../middleware/auth/authMiddleware";
@@ -47,10 +49,13 @@ router.get(
 router.get(
   "/my",
   protect,
-  authorizeRoles("admin",
-  "sales_manager",
-  "sales_executive",
-  "telecaller",),
+  authorizeRoles(
+    "super_admin",
+    "admin",
+    "sales_manager",
+    "sales_executive",
+    "telecaller"
+  ),
   getMyLeads
 );
 router.get(
@@ -64,7 +69,18 @@ router.get(
   getEmployeePerformance
 );
 
-
+router.get(
+  "/filter-options",
+  protect,
+  authorizeRoles(
+    "super_admin",
+    "admin",
+    "sales_manager",
+    "sales_executive",
+    "telecaller"
+  ),
+  getLeadFilterOptions
+);
 router.get("/filter", protect, filterLeads);
 router.get("/single/:id", protect, getSingleLead);
 router.get("/export", protect, exportLeads);
@@ -98,6 +114,10 @@ router.delete(
 router.post(
   "/website",
   createWebsiteLead
+);
+router.post(
+  "/website-enquiry",
+  createLandingPageLead
 );
 router.get("/:id", protect, getLeadById);
 router.get("/", protect, getLeads);

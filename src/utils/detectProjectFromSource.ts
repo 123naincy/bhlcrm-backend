@@ -68,3 +68,38 @@ export const detectProjectFromSource =
     projectName: mapping.projectName,
   };
 };
+// Detect brand and project for website landing page leads
+export const detectWebsiteLeadMapping = async (
+  identifier: string
+) => {
+  if (!identifier || typeof identifier !== "string") {
+    return null;
+  }
+
+  const mappings = await LeadSourceMapping.find({
+    sourceType: "landing_page",
+    identifier: identifier.trim(),
+    status: "active",
+  })
+    .limit(2)
+    .lean();
+
+  if (mappings.length !== 1) {
+    console.error(
+      "Invalid or ambiguous Website Lead mapping:",
+      identifier,
+      "Matches:",
+      mappings.length
+    );
+
+    return null;
+  }
+
+  const mapping = mappings[0];
+
+  return {
+    brandId: mapping.brandId,
+    projectId: mapping.projectId,
+    projectName: mapping.projectName,
+  };
+};
